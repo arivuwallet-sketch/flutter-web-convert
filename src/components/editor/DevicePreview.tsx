@@ -117,6 +117,7 @@ export function DevicePreview({ config }: { config: AppConfig }) {
   const [loaded, setLoaded] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const loadedRef = useRef(false);
 
   const url = config.appInfo.websiteUrl;
   const forcePortrait = config.settings.orientation === "portrait";
@@ -146,7 +147,6 @@ export function DevicePreview({ config }: { config: AppConfig }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey, url, config.splash.enabled, config.splash.durationMs]);
 
-  const loadedRef = useRef(false);
   useEffect(() => {
     loadedRef.current = loaded;
   }, [loaded]);
@@ -204,7 +204,7 @@ export function DevicePreview({ config }: { config: AppConfig }) {
       <div className="flex justify-center overflow-hidden rounded-lg border border-border bg-background p-6">
         <div style={{ transform: `scale(${scale})`, transformOrigin: "top center" }}>
           <div
-            className="relative overflow-hidden border-[10px] border-neutral-800 bg-black shadow-2xl"
+            className="relative flex flex-col overflow-hidden border-[10px] border-neutral-800 bg-black shadow-2xl"
             style={{
               width: size.w,
               height: size.h,
@@ -213,7 +213,7 @@ export function DevicePreview({ config }: { config: AppConfig }) {
           >
             {!config.settings.fullscreen ? <StatusBar config={config} device={device} /> : null}
 
-            <div className="relative flex-1 bg-white" style={{ height: "100%" }}>
+            <div className="relative min-h-0 flex-1 bg-white">
               {splashVisible ? <Splash config={config} /> : null}
 
               {blocked && !loaded ? (
@@ -249,9 +249,7 @@ export function DevicePreview({ config }: { config: AppConfig }) {
             </div>
 
             {config.addons.bottomNav && config.addons.bottomNavItems.length > 0 ? (
-              <div className="absolute inset-x-0 bottom-0">
-                <BottomNav config={config} />
-              </div>
+              <BottomNav config={config} />
             ) : null}
 
             {device === "ios" ? (
