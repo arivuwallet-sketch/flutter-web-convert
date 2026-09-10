@@ -21,6 +21,7 @@ import {
   SettingsSection,
   SplashSection,
 } from "@/components/editor/sections";
+import { DevicePreview } from "@/components/editor/DevicePreview";
 import {
   ArrowLeft,
   Blocks,
@@ -37,6 +38,7 @@ import {
   Save,
   ShieldCheck,
   Sliders,
+  Smartphone,
   Sparkles,
 } from "lucide-react";
 
@@ -58,6 +60,7 @@ export const Route = createFileRoute("/_authenticated/apps/$appId")({
 });
 
 const SECTIONS = [
+  { key: "preview", label: "Live Preview", icon: Smartphone },
   { key: "info", label: "App Info", icon: Info },
   { key: "branding", label: "Icon Library", icon: Image },
   { key: "splash", label: "Splash Screen", icon: Sparkles },
@@ -236,6 +239,7 @@ function AppEditor() {
         </nav>
 
         <section className="panel p-6">
+          {section === "preview" ? <DevicePreview config={config} /> : null}
           {section === "info" ? <AppInfoSection config={config} patch={patch} /> : null}
           {section === "branding" ? <BrandingSection config={config} patch={patch} /> : null}
           {section === "splash" ? <SplashSection config={config} patch={patch} /> : null}
