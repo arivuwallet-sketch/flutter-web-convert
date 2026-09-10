@@ -120,7 +120,7 @@ function AppEditor() {
         .update({
           name: next.appInfo.appName,
           website_url: next.appInfo.websiteUrl,
-          config: next as unknown as Record<string, unknown>,
+          config: JSON.parse(JSON.stringify(next)),
         })
         .eq("id", appId);
       if (error) throw error;

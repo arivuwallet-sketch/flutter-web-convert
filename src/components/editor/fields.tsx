@@ -30,7 +30,7 @@ export function Field({
   children,
 }: {
   label: string;
-  hint?: string;
+  hint?: string | undefined;
   children: ReactNode;
 }) {
   return (
@@ -53,9 +53,9 @@ export function TextField({
   label: string;
   value: string | number;
   onChange: (v: string) => void;
-  placeholder?: string;
-  hint?: string;
-  type?: string;
+  placeholder?: string | undefined;
+  hint?: string | undefined;
+  type?: string | undefined;
 }) {
   return (
     <Field label={label} hint={hint}>
@@ -81,9 +81,9 @@ export function AreaField({
   label: string;
   value: string;
   onChange: (v: string) => void;
-  hint?: string;
-  rows?: number;
-  placeholder?: string;
+  hint?: string | undefined;
+  rows?: number | undefined;
+  placeholder?: string | undefined;
 }) {
   return (
     <Field label={label} hint={hint}>
@@ -105,7 +105,7 @@ export function ToggleField({
   onChange,
 }: {
   label: string;
-  hint?: string;
+  hint?: string | undefined;
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
@@ -131,7 +131,7 @@ export function SelectField({
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
-  hint?: string;
+  hint?: string | undefined;
 }) {
   return (
     <Field label={label} hint={hint}>
@@ -190,8 +190,8 @@ export function ListField({
   label: string;
   values: string[];
   onChange: (v: string[]) => void;
-  placeholder?: string;
-  hint?: string;
+  placeholder?: string | undefined;
+  hint?: string | undefined;
 }) {
   return (
     <Field label={label} hint={hint ?? "One entry per line"}>

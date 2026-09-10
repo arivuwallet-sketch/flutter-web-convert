@@ -54,7 +54,7 @@ function Dashboard() {
           user_id: uid,
           name,
           website_url: cleanUrl,
-          config: defaultConfig(name, cleanUrl) as unknown as Record<string, unknown>,
+          config: JSON.parse(JSON.stringify(defaultConfig(name, cleanUrl))),
         })
         .select("id")
         .single();
