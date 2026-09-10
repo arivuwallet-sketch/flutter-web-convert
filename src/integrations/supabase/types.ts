@@ -14,7 +14,104 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      apps: {
+        Row: {
+          config: Json
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+          website_url: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+          website_url: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+          website_url?: string
+        }
+        Relationships: []
+      }
+      builds: {
+        Row: {
+          app_id: string
+          artifact_url: string | null
+          created_at: string
+          external_id: string | null
+          id: string
+          message: string | null
+          platform: string
+          provider: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          app_id: string
+          artifact_url?: string | null
+          created_at?: string
+          external_id?: string | null
+          id?: string
+          message?: string | null
+          platform: string
+          provider?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          app_id?: string
+          artifact_url?: string | null
+          created_at?: string
+          external_id?: string | null
+          id?: string
+          message?: string | null
+          platform?: string
+          provider?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builds_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
