@@ -28,10 +28,14 @@ function placeholderSvg(color: string, glyphColor: string, letter: string) {
 </svg>`;
 }
 
-async function zipFor(config: AppConfig, platform: "android" | "ios" | "both") {
+async function zipFor(
+  config: AppConfig,
+  platform: "android" | "ios" | "both",
+  liveConfigUrl: string,
+) {
   const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
-  const files = buildFlutterProject(config);
+  const files = buildFlutterProject(config, liveConfigUrl);
 
   for (const [path, content] of Object.entries(files)) {
     if (platform === "android" && path.startsWith("ios/")) continue;
