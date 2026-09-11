@@ -67,6 +67,7 @@ function pubspec(c: AppConfig): string {
     "  shared_preferences: ^2.3.3",
     "  package_info_plus: ^8.1.1",
     "  intl: ^0.19.0",
+    "  http: ^1.2.2",
   ];
   if (c.addons.shareButton) deps.push("  share_plus: ^10.1.2");
   if (c.addons.pushEnabled) deps.push("  firebase_core: ^3.8.0", "  firebase_messaging: ^15.1.5");
@@ -119,7 +120,7 @@ flutter_native_splash:
 `;
 }
 
-function appConfigDart(c: AppConfig): string {
+function appConfigDart(c: AppConfig, liveConfigUrl: string): string {
   const l = c.linkHandling;
   const s = c.settings;
   return `// GENERATED FILE - edit values here or regenerate from the web console.
@@ -131,6 +132,12 @@ class AppConfig {
   static const String startUrl = ${dartStr(c.appInfo.websiteUrl)};
   static const String versionName = ${dartStr(c.appInfo.versionName)};
   static const int versionCode = ${c.appInfo.versionCode};
+
+  // Live sync: the app pulls the latest settings from this endpoint on launch
+  // and every time it returns to the foreground.
+  static const String liveConfigUrl = ${dartStr(liveConfigUrl)};
+  static const bool liveSync = ${liveConfigUrl ? "true" : "false"};
+
 
   // Branding
   static const Color themeColor = ${hexToDart(c.branding.themeColor)};
@@ -247,16 +254,21 @@ class WebOverrides {
   static const String css = ${dartStr(css)};
   static const String js = ${dartStr(js)};
 
-  static String script() {
+  static String script() => scriptFor(css, js);
+
+  /// Builds the injection script for the given css/js. Live-synced overrides
+  /// pass the freshly downloaded values here.
+  static String scriptFor(String cssIn, String jsIn) {
     final buffer = StringBuffer();
-    if (css.isNotEmpty) {
+    if (cssIn.isNotEmpty) {
+      final safe = cssIn.replaceAll('"', '\\\\"').replaceAll('\\n', ' ');
       buffer.writeln("(function(){var s=document.createElement('style');"
           "s.type='text/css';s.appendChild(document.createTextNode(\\"" +
-          css.replaceAll('"', '\\\\"').replaceAll('\\n', ' ') +
+          safe +
           "\\"));document.head.appendChild(s);})();");
     }
-    if (js.isNotEmpty) {
-      buffer.writeln(js);
+    if (jsIn.isNotEmpty) {
+      buffer.writeln(jsIn);
     }
     return buffer.toString();
   }
@@ -290,6 +302,142 @@ ${c.localization.locales
 `;
 }
 
+function liveConfigDart(): string {
+  return `// GENERATED FILE - over-the-air settings sync.
+// Downloads the latest app settings published from the web console and caches
+// them on the device, so edits appear in the installed Android/iOS app without
+// rebuilding or resubmitting to the stores.
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'app_config.dart';
+import 'web_overrides.dart';
+
+class Live {
+  static const String _prefsKey = 'live_config_v1';
+  static Map<String, dynamic> _data = <String, dynamic>{};
+  static String _raw = '';
+
+  /// Loads the last downloaded settings from disk (instant, offline safe).
+  static Future<void> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_prefsKey);
+      if (cached != null && cached.isNotEmpty) {
+        _raw = cached;
+        _data = jsonDecode(cached) as Map<String, dynamic>;
+      }
+    } catch (_) {
+      _data = <String, dynamic>{};
+    }
+  }
+
+  /// Fetches the newest settings. Returns true when something actually changed.
+  static Future<bool> refresh() async {
+    if (!AppConfig.liveSync) return false;
+    try {
+      final res = await http
+          .get(Uri.parse(AppConfig.liveConfigUrl), headers: {
+            'accept': 'application/json',
+            'cache-control': 'no-cache',
+          })
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return false;
+      final body = res.body;
+      final parsed = jsonDecode(body);
+      if (parsed is! Map<String, dynamic>) return false;
+      if (body == _raw) return false;
+      _raw = body;
+      _data = parsed;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefsKey, body);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Adds a cache-busting stamp so the web view shows the newest site content.
+  static String freshUrl(String url) {
+    if (url.isEmpty) return url;
+    final uri = Uri.parse(url);
+    final query = Map<String, String>.from(uri.queryParameters);
+    query['_v'] = DateTime.now().millisecondsSinceEpoch.toString();
+    return uri.replace(queryParameters: query).toString();
+  }
+
+  static String _s(String key, String fallback) {
+    final value = _data[key];
+    return value is String && value.isNotEmpty ? value : fallback;
+  }
+
+  static bool _b(String key, bool fallback) {
+    final value = _data[key];
+    return value is bool ? value : fallback;
+  }
+
+  static int _i(String key, int fallback) {
+    final value = _data[key];
+    return value is num ? value.toInt() : fallback;
+  }
+
+  static Color _c(String key, Color fallback) {
+    final value = _data[key];
+    if (value is String) {
+      final hex = value.replaceAll('#', '');
+      if (hex.length >= 6) {
+        final parsed = int.tryParse(hex.substring(0, 6), radix: 16);
+        if (parsed != null) return Color(0xFF000000 | parsed);
+      }
+    }
+    return fallback;
+  }
+
+  static List<String> _l(String key, List<String> fallback) {
+    final value = _data[key];
+    if (value is List) return value.whereType<String>().toList();
+    return fallback;
+  }
+
+  static String get startUrl => _s('startUrl', AppConfig.startUrl);
+  static Color get themeColor => _c('themeColor', AppConfig.themeColor);
+  static Color get accentColor => _c('accentColor', AppConfig.accentColor);
+  static Color get splashBackground =>
+      _c('splashBackground', AppConfig.splashBackground);
+  static String get splashTagline => _s('splashTagline', AppConfig.splashTagline);
+  static int get splashDurationMs =>
+      _i('splashDurationMs', AppConfig.splashDurationMs);
+  static String get customCss => _s('customCss', WebOverrides.css);
+  static String get customJs => _s('customJs', WebOverrides.js);
+  static List<String> get internalDomains =>
+      _l('internalDomains', AppConfig.internalDomains);
+  static List<String> get blockedUrlPatterns =>
+      _l('blockedUrlPatterns', AppConfig.blockedUrlPatterns);
+  static bool get bottomNav => _b('bottomNav', AppConfig.bottomNav);
+
+  static List<Map<String, String>> get bottomNavItems {
+    final value = _data['bottomNavItems'];
+    if (value is List) {
+      final items = value
+          .whereType<Map>()
+          .map((item) => {
+                'label': (item['label'] ?? '').toString(),
+                'url': (item['url'] ?? '').toString(),
+                'icon': (item['icon'] ?? '').toString(),
+              })
+          .where((item) => item['url']!.isNotEmpty)
+          .toList();
+      if (items.isNotEmpty) return items;
+    }
+    return AppConfig.bottomNavItems
+        .map((item) => Map<String, String>.from(item))
+        .toList();
+  }
+}
+`;
+}
+
 function mainDart(c: AppConfig): string {
   return `import 'dart:async';
 import 'package:flutter/material.dart';
@@ -298,11 +446,14 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 ${c.addons.shareButton ? "import 'package:share_plus/share_plus.dart';\n" : ""}${c.addons.pushEnabled ? "import 'package:firebase_core/firebase_core.dart';\nimport 'package:firebase_messaging/firebase_messaging.dart';\n" : ""}${c.addons.biometricLock ? "import 'package:local_auth/local_auth.dart';\n" : ""}import 'app_config.dart';
+import 'live_config.dart';
 import 'web_overrides.dart';
 import 'strings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Live.load();
+  unawaited(Live.refresh());
 ${c.addons.pushEnabled ? "  await Firebase.initializeApp();\n  await FirebaseMessaging.instance.requestPermission();\n" : ""}  if (AppConfig.orientation == 'portrait') {
     await SystemChrome.setPreferredOrientations(
       [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown],
@@ -334,10 +485,10 @@ class WebApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: AppConfig.accentColor,
+          seedColor: Live.accentColor,
           brightness: Brightness.dark,
         ),
-        scaffoldBackgroundColor: AppConfig.themeColor,
+        scaffoldBackgroundColor: Live.themeColor,
       ),
       home: AppConfig.splashEnabled ? const SplashScreen() : const WebHome(),
     );
@@ -355,7 +506,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    Timer(Duration(milliseconds: AppConfig.splashDurationMs), () {
+    Timer(Duration(milliseconds: Live.splashDurationMs), () {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => const WebHome()),
@@ -366,16 +517,16 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppConfig.splashBackground,
+      backgroundColor: Live.splashBackground,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Image.asset('assets/splash.png', width: 140, height: 140),
             const SizedBox(height: 24),
-            if (AppConfig.splashTagline.isNotEmpty)
+            if (Live.splashTagline.isNotEmpty)
               Text(
-                AppConfig.splashTagline,
+                Live.splashTagline,
                 style: const TextStyle(color: Colors.white70, fontSize: 14),
               ),
             const SizedBox(height: 20),
@@ -395,20 +546,52 @@ class WebHome extends StatefulWidget {
   State<WebHome> createState() => _WebHomeState();
 }
 
-class _WebHomeState extends State<WebHome> {
+class _WebHomeState extends State<WebHome> with WidgetsBindingObserver {
   late final WebViewController _controller;
   bool _offline = false;
   bool _loading = true;
   int _navIndex = 0;
   String _locale = AppConfig.defaultLocale;
+  Timer? _syncTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _setupLocale();
     _setupConnectivity();
     _setupController();
+    _startLiveSync();
 ${c.addons.biometricLock ? "    _authenticate();\n" : ""}  }
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _syncLive();
+  }
+
+  /// Pulls the newest settings published from the web console and applies them
+  /// immediately - no reinstall, no store update.
+  void _startLiveSync() {
+    if (!AppConfig.liveSync) return;
+    _syncLive();
+    _syncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncLive());
+  }
+
+  Future<void> _syncLive() async {
+    if (!AppConfig.liveSync) return;
+    final changed = await Live.refresh();
+    if (!changed || !mounted) return;
+    setState(() {});
+    _controller.loadRequest(Uri.parse(Live.freshUrl(Live.startUrl)));
+  }
+
 
   void _setupLocale() {
     if (!AppConfig.followSystemLocale) return;
@@ -447,7 +630,7 @@ ${
             ? JavaScriptMode.unrestricted
             : JavaScriptMode.disabled,
       )
-      ..setBackgroundColor(AppConfig.themeColor)
+      ..setBackgroundColor(Live.themeColor)
       ..enableZoom(AppConfig.zoomEnabled)
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -472,26 +655,26 @@ ${
             ua,
       );
     }
-    _controller.loadRequest(Uri.parse(AppConfig.startUrl));
+    _controller.loadRequest(Uri.parse(Live.startUrl));
   }
 
   void _inject() {
-    final script = WebOverrides.script();
+    final script = WebOverrides.scriptFor(Live.customCss, Live.customJs);
     if (script.isNotEmpty) {
       _controller.runJavaScript(script);
     }
   }
 
   bool _isInternal(Uri uri) {
-    if (AppConfig.internalDomains.isEmpty) return true;
-    return AppConfig.internalDomains
+    if (Live.internalDomains.isEmpty) return true;
+    return Live.internalDomains
         .any((d) => uri.host == d || uri.host.endsWith('.' + d));
   }
 
   Future<NavigationDecision> _handleNavigation(NavigationRequest request) async {
     final uri = Uri.parse(request.url);
 
-    for (final pattern in AppConfig.blockedUrlPatterns) {
+    for (final pattern in Live.blockedUrlPatterns) {
       if (pattern.isNotEmpty && request.url.contains(pattern)) {
         return NavigationDecision.prevent;
       }
@@ -552,7 +735,7 @@ ${
         if (await _onWillPop() && mounted) Navigator.of(context).pop();
       },
       child: Scaffold(
-        backgroundColor: AppConfig.themeColor,
+        backgroundColor: Live.themeColor,
         body: SafeArea(
           top: !AppConfig.fullscreen,
           child: _offline ? _offlineView() : _webView(),
@@ -560,23 +743,23 @@ ${
         floatingActionButton: ${
           c.addons.shareButton
             ? `FloatingActionButton.small(
-          backgroundColor: AppConfig.accentColor,
-          onPressed: () => Share.share(AppConfig.startUrl),
+          backgroundColor: Live.accentColor,
+          onPressed: () => Share.share(Live.startUrl),
           child: const Icon(Icons.share),
         )`
             : "null"
         },
-        bottomNavigationBar: AppConfig.bottomNav && AppConfig.bottomNavItems.isNotEmpty
+        bottomNavigationBar: Live.bottomNav && Live.bottomNavItems.isNotEmpty
             ? BottomNavigationBar(
                 currentIndex: _navIndex,
                 type: BottomNavigationBarType.fixed,
                 onTap: (index) {
                   setState(() => _navIndex = index);
                   _controller.loadRequest(
-                    Uri.parse(AppConfig.bottomNavItems[index]['url']!),
+                    Uri.parse(Live.bottomNavItems[index]['url']!),
                   );
                 },
-                items: AppConfig.bottomNavItems
+                items: Live.bottomNavItems
                     .map(
                       (item) => BottomNavigationBarItem(
                         icon: const Icon(Icons.circle_outlined),
@@ -595,7 +778,7 @@ ${
       children: [
         WebViewWidget(controller: _controller),
         if (_loading)
-          Center(child: CircularProgressIndicator(color: AppConfig.accentColor)),
+          Center(child: CircularProgressIndicator(color: Live.accentColor)),
       ],
     );
     if (!AppConfig.pullToRefresh) return view;
@@ -953,7 +1136,10 @@ flutter {
 }
 
 /** Full project as path -> text content. */
-export function buildFlutterProject(c: AppConfig): Record<string, string> {
+export function buildFlutterProject(
+  c: AppConfig,
+  liveConfigUrl = "",
+): Record<string, string> {
   const files: Record<string, string> = {
     "README.md": readme(c),
     "pubspec.yaml": pubspec(c),
@@ -963,7 +1149,8 @@ export function buildFlutterProject(c: AppConfig): Record<string, string> {
     "codemagic.yaml": codemagicYaml(c),
     ".github/workflows/build.yml": githubWorkflow,
     "lib/main.dart": mainDart(c),
-    "lib/app_config.dart": appConfigDart(c),
+    "lib/app_config.dart": appConfigDart(c, liveConfigUrl),
+    "lib/live_config.dart": liveConfigDart(),
     "lib/web_overrides.dart": injectionDart(c),
     "lib/strings.dart": stringsDart(c),
     "assets/config/app_config.json": JSON.stringify(c, null, 2),

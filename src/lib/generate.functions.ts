@@ -1,7 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { mergeConfig, type AppConfig } from "./appConfig";
 import { buildFlutterProject } from "./flutterProject";
+
+/** Public settings feed baked into the generated app so edits reach phones live. */
+function liveConfigUrl(appId: string) {
+  const configured = process.env["PUBLIC_SITE_URL"];
+  const origin = configured || new URL(getRequest().url).origin;
+  return `${origin.replace(/\/$/, "")}/api/public/app-config/${appId}`;
+}
 
 function safeName(s: string) {
   return (s || "app").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -28,10 +36,14 @@ function placeholderSvg(color: string, glyphColor: string, letter: string) {
 </svg>`;
 }
 
-async function zipFor(config: AppConfig, platform: "android" | "ios" | "both") {
+async function zipFor(
+  config: AppConfig,
+  platform: "android" | "ios" | "both",
+  liveConfigUrl: string,
+) {
   const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
-  const files = buildFlutterProject(config);
+  const files = buildFlutterProject(config, liveConfigUrl);
 
   for (const [path, content] of Object.entries(files)) {
     if (platform === "android" && path.startsWith("ios/")) continue;
@@ -86,7 +98,7 @@ export const generateProject = createServerFn({ method: "POST" })
     if (error || !app) throw new Error("App not found");
 
     const config = mergeConfig(app.name, app.website_url, app.config);
-    const base64 = await zipFor(config, data.platform);
+    const base64 = await zipFor(config, data.platform, liveConfigUrl(data.appId));
     const suffix =
       data.platform === "android" ? "android" : data.platform === "ios" ? "ios" : "full";
     return {
@@ -106,7 +118,7 @@ export const previewFile = createServerFn({ method: "POST" })
       .single();
     if (error || !app) throw new Error("App not found");
     const config = mergeConfig(app.name, app.website_url, app.config);
-    const files = buildFlutterProject(config);
+    const files = buildFlutterProject(config, liveConfigUrl(data.appId));
     return { paths: Object.keys(files).sort(), content: files[data.path] ?? "" };
   });
 
