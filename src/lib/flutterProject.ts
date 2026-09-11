@@ -67,6 +67,7 @@ function pubspec(c: AppConfig): string {
     "  shared_preferences: ^2.3.3",
     "  package_info_plus: ^8.1.1",
     "  intl: ^0.19.0",
+    "  http: ^1.2.2",
   ];
   if (c.addons.shareButton) deps.push("  share_plus: ^10.1.2");
   if (c.addons.pushEnabled) deps.push("  firebase_core: ^3.8.0", "  firebase_messaging: ^15.1.5");
@@ -119,7 +120,7 @@ flutter_native_splash:
 `;
 }
 
-function appConfigDart(c: AppConfig): string {
+function appConfigDart(c: AppConfig, liveConfigUrl: string): string {
   const l = c.linkHandling;
   const s = c.settings;
   return `// GENERATED FILE - edit values here or regenerate from the web console.
@@ -131,6 +132,12 @@ class AppConfig {
   static const String startUrl = ${dartStr(c.appInfo.websiteUrl)};
   static const String versionName = ${dartStr(c.appInfo.versionName)};
   static const int versionCode = ${c.appInfo.versionCode};
+
+  // Live sync: the app pulls the latest settings from this endpoint on launch
+  // and every time it returns to the foreground.
+  static const String liveConfigUrl = ${dartStr(liveConfigUrl)};
+  static const bool liveSync = ${liveConfigUrl ? "true" : "false"};
+
 
   // Branding
   static const Color themeColor = ${hexToDart(c.branding.themeColor)};
