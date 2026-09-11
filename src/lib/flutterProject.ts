@@ -349,10 +349,10 @@ class WebApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: AppConfig.accentColor,
+          seedColor: Live.accentColor,
           brightness: Brightness.dark,
         ),
-        scaffoldBackgroundColor: AppConfig.themeColor,
+        scaffoldBackgroundColor: Live.themeColor,
       ),
       home: AppConfig.splashEnabled ? const SplashScreen() : const WebHome(),
     );
@@ -370,7 +370,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    Timer(Duration(milliseconds: AppConfig.splashDurationMs), () {
+    Timer(Duration(milliseconds: Live.splashDurationMs), () {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => const WebHome()),
@@ -381,16 +381,16 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppConfig.splashBackground,
+      backgroundColor: Live.splashBackground,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Image.asset('assets/splash.png', width: 140, height: 140),
             const SizedBox(height: 24),
-            if (AppConfig.splashTagline.isNotEmpty)
+            if (Live.splashTagline.isNotEmpty)
               Text(
-                AppConfig.splashTagline,
+                Live.splashTagline,
                 style: const TextStyle(color: Colors.white70, fontSize: 14),
               ),
             const SizedBox(height: 20),
@@ -462,7 +462,7 @@ ${
             ? JavaScriptMode.unrestricted
             : JavaScriptMode.disabled,
       )
-      ..setBackgroundColor(AppConfig.themeColor)
+      ..setBackgroundColor(Live.themeColor)
       ..enableZoom(AppConfig.zoomEnabled)
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -487,26 +487,26 @@ ${
             ua,
       );
     }
-    _controller.loadRequest(Uri.parse(AppConfig.startUrl));
+    _controller.loadRequest(Uri.parse(Live.startUrl));
   }
 
   void _inject() {
-    final script = WebOverrides.script();
+    final script = WebOverrides.scriptFor(Live.customCss, Live.customJs);
     if (script.isNotEmpty) {
       _controller.runJavaScript(script);
     }
   }
 
   bool _isInternal(Uri uri) {
-    if (AppConfig.internalDomains.isEmpty) return true;
-    return AppConfig.internalDomains
+    if (Live.internalDomains.isEmpty) return true;
+    return Live.internalDomains
         .any((d) => uri.host == d || uri.host.endsWith('.' + d));
   }
 
   Future<NavigationDecision> _handleNavigation(NavigationRequest request) async {
     final uri = Uri.parse(request.url);
 
-    for (final pattern in AppConfig.blockedUrlPatterns) {
+    for (final pattern in Live.blockedUrlPatterns) {
       if (pattern.isNotEmpty && request.url.contains(pattern)) {
         return NavigationDecision.prevent;
       }
@@ -567,7 +567,7 @@ ${
         if (await _onWillPop() && mounted) Navigator.of(context).pop();
       },
       child: Scaffold(
-        backgroundColor: AppConfig.themeColor,
+        backgroundColor: Live.themeColor,
         body: SafeArea(
           top: !AppConfig.fullscreen,
           child: _offline ? _offlineView() : _webView(),
@@ -575,23 +575,23 @@ ${
         floatingActionButton: ${
           c.addons.shareButton
             ? `FloatingActionButton.small(
-          backgroundColor: AppConfig.accentColor,
-          onPressed: () => Share.share(AppConfig.startUrl),
+          backgroundColor: Live.accentColor,
+          onPressed: () => Share.share(Live.startUrl),
           child: const Icon(Icons.share),
         )`
             : "null"
         },
-        bottomNavigationBar: AppConfig.bottomNav && AppConfig.bottomNavItems.isNotEmpty
+        bottomNavigationBar: Live.bottomNav && Live.bottomNavItems.isNotEmpty
             ? BottomNavigationBar(
                 currentIndex: _navIndex,
                 type: BottomNavigationBarType.fixed,
                 onTap: (index) {
                   setState(() => _navIndex = index);
                   _controller.loadRequest(
-                    Uri.parse(AppConfig.bottomNavItems[index]['url']!),
+                    Uri.parse(Live.bottomNavItems[index]['url']!),
                   );
                 },
-                items: AppConfig.bottomNavItems
+                items: Live.bottomNavItems
                     .map(
                       (item) => BottomNavigationBarItem(
                         icon: const Icon(Icons.circle_outlined),
@@ -610,7 +610,7 @@ ${
       children: [
         WebViewWidget(controller: _controller),
         if (_loading)
-          Center(child: CircularProgressIndicator(color: AppConfig.accentColor)),
+          Center(child: CircularProgressIndicator(color: Live.accentColor)),
       ],
     );
     if (!AppConfig.pullToRefresh) return view;
