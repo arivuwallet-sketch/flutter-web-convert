@@ -1,7 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { mergeConfig, type AppConfig } from "./appConfig";
 import { buildFlutterProject } from "./flutterProject";
+
+/** Public settings feed baked into the generated app so edits reach phones live. */
+function liveConfigUrl(appId: string) {
+  const configured = process.env["PUBLIC_SITE_URL"];
+  const origin = configured || new URL(getRequest().url).origin;
+  return `${origin.replace(/\/$/, "")}/api/public/app-config/${appId}`;
+}
 
 function safeName(s: string) {
   return (s || "app").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -90,7 +98,7 @@ export const generateProject = createServerFn({ method: "POST" })
     if (error || !app) throw new Error("App not found");
 
     const config = mergeConfig(app.name, app.website_url, app.config);
-    const base64 = await zipFor(config, data.platform);
+    const base64 = await zipFor(config, data.platform, liveConfigUrl(data.appId));
     const suffix =
       data.platform === "android" ? "android" : data.platform === "ios" ? "ios" : "full";
     return {
