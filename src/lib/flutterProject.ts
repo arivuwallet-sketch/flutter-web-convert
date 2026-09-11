@@ -410,20 +410,52 @@ class WebHome extends StatefulWidget {
   State<WebHome> createState() => _WebHomeState();
 }
 
-class _WebHomeState extends State<WebHome> {
+class _WebHomeState extends State<WebHome> with WidgetsBindingObserver {
   late final WebViewController _controller;
   bool _offline = false;
   bool _loading = true;
   int _navIndex = 0;
   String _locale = AppConfig.defaultLocale;
+  Timer? _syncTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _setupLocale();
     _setupConnectivity();
     _setupController();
+    _startLiveSync();
 ${c.addons.biometricLock ? "    _authenticate();\n" : ""}  }
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _syncLive();
+  }
+
+  /// Pulls the newest settings published from the web console and applies them
+  /// immediately - no reinstall, no store update.
+  void _startLiveSync() {
+    if (!AppConfig.liveSync) return;
+    _syncLive();
+    _syncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncLive());
+  }
+
+  Future<void> _syncLive() async {
+    if (!AppConfig.liveSync) return;
+    final changed = await Live.refresh();
+    if (!changed || !mounted) return;
+    setState(() {});
+    _controller.loadRequest(Uri.parse(Live.freshUrl(Live.startUrl)));
+  }
+
 
   void _setupLocale() {
     if (!AppConfig.followSystemLocale) return;
