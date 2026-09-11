@@ -254,16 +254,21 @@ class WebOverrides {
   static const String css = ${dartStr(css)};
   static const String js = ${dartStr(js)};
 
-  static String script() {
+  static String script() => scriptFor(css, js);
+
+  /// Builds the injection script for the given css/js. Live-synced overrides
+  /// pass the freshly downloaded values here.
+  static String scriptFor(String cssIn, String jsIn) {
     final buffer = StringBuffer();
-    if (css.isNotEmpty) {
+    if (cssIn.isNotEmpty) {
+      final safe = cssIn.replaceAll('"', '\\\\"').replaceAll('\\n', ' ');
       buffer.writeln("(function(){var s=document.createElement('style');"
           "s.type='text/css';s.appendChild(document.createTextNode(\\"" +
-          css.replaceAll('"', '\\\\"').replaceAll('\\n', ' ') +
+          safe +
           "\\"));document.head.appendChild(s);})();");
     }
-    if (js.isNotEmpty) {
-      buffer.writeln(js);
+    if (jsIn.isNotEmpty) {
+      buffer.writeln(jsIn);
     }
     return buffer.toString();
   }
