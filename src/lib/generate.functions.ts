@@ -118,7 +118,7 @@ export const previewFile = createServerFn({ method: "POST" })
       .single();
     if (error || !app) throw new Error("App not found");
     const config = mergeConfig(app.name, app.website_url, app.config);
-    const files = buildFlutterProject(config);
+    const files = buildFlutterProject(config, liveConfigUrl(data.appId));
     return { paths: Object.keys(files).sort(), content: files[data.path] ?? "" };
   });
 

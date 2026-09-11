@@ -136,7 +136,12 @@ function AppEditor() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save"),
   });
 
-  const files = useMemo(() => (config ? buildFlutterProject(config) : {}), [config]);
+  const liveConfigUrl =
+    typeof window === "undefined" ? "" : `${window.location.origin}/api/public/app-config/${appId}`;
+  const files = useMemo(
+    () => (config ? buildFlutterProject(config, liveConfigUrl) : {}),
+    [config, liveConfigUrl],
+  );
 
   const download = useMutation({
     mutationFn: async (platform: "android" | "ios" | "both") => {
