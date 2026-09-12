@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { mergeConfig, type AppConfig } from "@/lib/appConfig";
 import { buildFlutterProject } from "@/lib/flutterProject";
-import { generateProject, startCloudBuild } from "@/lib/generate.functions";
+import { generateProject, refreshBuilds, startCloudBuild } from "@/lib/generate.functions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -96,6 +96,14 @@ function AppEditor() {
   const [selectedFile, setSelectedFile] = useState("lib/main.dart");
   const generate = useServerFn(generateProject);
   const cloudBuild = useServerFn(startCloudBuild);
+  const syncBuilds = useServerFn(refreshBuilds);
+
+  const builds = useQuery({
+    queryKey: ["builds", appId],
+    queryFn: () => syncBuilds({ data: { appId } }),
+    refetchInterval: (q) =>
+      q.state.data?.builds?.some((b) => b.status === "running") ? 10000 : 60000,
+  });
 
   const app = useQuery({
     queryKey: ["app", appId],
@@ -160,7 +168,11 @@ function AppEditor() {
       if (config && dirty) await save.mutateAsync(config);
       return cloudBuild({ data: { appId, platform } });
     },
-    onSuccess: (res) => (res.ok ? toast.success(res.message) : toast.warning(res.message)),
+    onSuccess: (res) => {
+      if (res.ok) toast.success(res.message);
+      else toast.warning(res.message);
+      builds.refetch();
+    },
     onError: () => toast.error("Could not reach the build service"),
   });
 
@@ -221,6 +233,49 @@ function AppEditor() {
           </Button>
         </div>
       </div>
+
+      {builds.data?.builds?.length ? (
+        <div className="panel mt-4 p-4">
+          <h2 className="mb-3 text-sm font-medium">Cloud builds</h2>
+          <ul className="space-y-2">
+            {builds.data.builds.map((b) => (
+              <li
+                key={b.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs"
+              >
+                <span className="flex items-center gap-2">
+                  <Badge variant="outline">{b.platform === "android" ? "Android" : "iOS"}</Badge>
+                  <span
+                    className={
+                      b.status === "success"
+                        ? "text-primary"
+                        : b.status === "failed"
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                    }
+                  >
+                    {b.message || b.status}
+                  </span>
+                  <span className="font-mono text-muted-foreground">
+                    {new Date(b.created_at).toLocaleString()}
+                  </span>
+                </span>
+                {b.status === "success" && b.artifact_url ? (
+                  <a
+                    href={b.artifact_url}
+                    className="inline-flex items-center gap-1 text-primary underline"
+                  >
+                    <Download className="size-3" />
+                    Download {b.platform === "android" ? "APK" : "IPA"}
+                  </a>
+                ) : b.status === "running" ? (
+                  <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr]">
         <nav className="flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
