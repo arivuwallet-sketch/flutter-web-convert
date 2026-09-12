@@ -1006,26 +1006,58 @@ function codemagicYaml(c: AppConfig): string {
   return `workflows:
   android-release:
     name: ${c.appInfo.appName} Android
-    instance_type: mac_mini_m2
+    instance_type: linux_x2
+    max_build_duration: 60
     environment:
       flutter: stable
+      java: 17
+      groups:
+        - android_signing
     scripts:
+      - name: Keystore (optional, from the android_signing group)
+        script: |
+          if [ -n "$CM_KEYSTORE" ]; then
+            echo $CM_KEYSTORE | base64 --decode > "$CM_BUILD_DIR/android/app/keystore.jks"
+            cat >> "$CM_BUILD_DIR/android/key.properties" <<EOF
+          storePassword=$CM_KEYSTORE_PASSWORD
+          keyPassword=$CM_KEY_PASSWORD
+          keyAlias=$CM_KEY_ALIAS
+          storeFile=keystore.jks
+          EOF
+          fi
       - flutter pub get
       - dart run flutter_launcher_icons
       - dart run flutter_native_splash:create
       - flutter build apk --release
+      - flutter build appbundle --release
     artifacts:
       - build/**/outputs/**/*.apk
+      - build/**/outputs/**/*.aab
   ios-release:
     name: ${c.appInfo.appName} iOS
     instance_type: mac_mini_m2
+    max_build_duration: 90
+    integrations:
+      app_store_connect: codemagic
     environment:
       flutter: stable
       xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: ${c.appInfo.bundleId}
     scripts:
       - flutter pub get
+      - dart run flutter_launcher_icons
+      - dart run flutter_native_splash:create
+      - name: Set up signing
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "${c.appInfo.bundleId}" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
       - find . -name "Podfile" -execdir pod install \\;
-      - flutter build ipa --release --no-codesign
+      - flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
       - build/ios/archive/*.xcarchive
