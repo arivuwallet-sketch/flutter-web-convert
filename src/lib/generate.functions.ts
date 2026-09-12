@@ -286,6 +286,7 @@ export const refreshBuilds = createServerFn({ method: "POST" })
       const res = await cmFetch(`/builds/${b.external_id}`);
       const build = (res.body["build"] ?? {}) as {
         status?: string;
+        message?: string;
         artefacts?: Artefact[];
       };
       if (!res.ok || !build.status) continue;
@@ -298,6 +299,7 @@ export const refreshBuilds = createServerFn({ method: "POST" })
         if (art?.url) artifactUrl = await publicArtefactUrl(art.url);
       }
 
+      const reason = (build.message ?? "").trim();
       await context.supabase
         .from("builds")
         .update({
@@ -307,9 +309,10 @@ export const refreshBuilds = createServerFn({ method: "POST" })
             status === "success"
               ? "Build finished"
               : status === "failed"
-                ? `Build ${build.status}`
+                ? reason || `Build ${build.status}`
                 : `Building (${build.status})`,
         })
+
         .eq("id", b.id);
 
       b.status = status;
