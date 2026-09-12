@@ -1045,7 +1045,7 @@ function codemagicYaml(c: AppConfig): string {
       cocoapods: default
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: ${c.appInfo.bundleId}
+        bundle_identifier: ${c.appInfo.packageId}
     scripts:
       - flutter pub get
       - dart run flutter_launcher_icons
@@ -1053,7 +1053,7 @@ function codemagicYaml(c: AppConfig): string {
       - name: Set up signing
         script: |
           keychain initialize
-          app-store-connect fetch-signing-files "${c.appInfo.bundleId}" --type IOS_APP_STORE --create
+          app-store-connect fetch-signing-files "${c.appInfo.packageId}" --type IOS_APP_STORE --create
           keychain add-certificates
           xcode-project use-profiles
       - find . -name "Podfile" -execdir pod install \\;
