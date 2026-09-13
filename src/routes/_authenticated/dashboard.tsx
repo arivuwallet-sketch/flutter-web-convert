@@ -128,7 +128,7 @@ function Dashboard() {
         {apps.data?.map((app) => (
           <div
             key={app.id}
-            className="panel flex items-center justify-between gap-4 p-4 transition-colors hover:border-primary/50"
+            className="panel tilt flex items-center justify-between gap-4 p-4 hover:border-primary/50"
           >
             <button
               className="flex min-w-0 flex-1 items-center gap-3 text-left"
