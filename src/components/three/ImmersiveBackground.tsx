@@ -18,8 +18,8 @@ export function ImmersiveBackground() {
           <Scene dense={dense} />
         </Suspense>
       </ClientOnly>
-      <div className="absolute inset-0 bg-background/55" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,var(--background)_95%)]" />
+      <div className="absolute inset-0 bg-background/25" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_45%,color-mix(in_oklab,var(--background)_85%,transparent)_100%)]" />
     </div>
   );
 }

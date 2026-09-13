@@ -52,7 +52,7 @@ function DeviceSlab({
       </mesh>
       <mesh position={[0, 0, 0.056]}>
         <planeGeometry args={[1.0, 2.14]} />
-        <meshBasicMaterial color={accent} toneMapped={false} transparent opacity={0.14} />
+        <meshBasicMaterial color={accent} toneMapped={false} transparent opacity={0.3} />
       </mesh>
       <lineSegments position={[0, 0, 0.058]}>
         <edgesGeometry args={[new THREE.PlaneGeometry(1.0, 2.14)]} />
@@ -83,7 +83,7 @@ function Grid({ accent }: { accent: string }) {
       rotation-x={-Math.PI / 2}
       position={[0, -4.2, 0]}
     >
-      <lineBasicMaterial color={accent} transparent opacity={0.12} />
+      <lineBasicMaterial color={accent} transparent opacity={0.22} />
     </lineSegments>
   );
 }
@@ -110,7 +110,7 @@ function Dust({ accent }: { accent: string }) {
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
-      <pointsMaterial color={accent} size={0.055} sizeAttenuation transparent opacity={0.5} />
+      <pointsMaterial color={accent} size={0.055} sizeAttenuation transparent opacity={0.7} />
     </points>
   );
 }
@@ -138,7 +138,7 @@ export default function Scene({ dense }: { dense: boolean }) {
       camera={{ position: [0, 1, 11], fov: 52 }}
     >
       <color attach="background" args={[bg]} />
-      <fog attach="fog" args={[bg, 14, 34]} />
+      <fog attach="fog" args={[bg, 18, 46]} />
 
       <ambientLight intensity={0.45} />
       <directionalLight position={[6, 10, 8]} intensity={1.1} />
