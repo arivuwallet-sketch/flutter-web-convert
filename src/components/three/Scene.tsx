@@ -3,12 +3,21 @@ import { Environment, Lightformer, Float } from "@react-three/drei";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 
+/**
+ * Design tokens are oklch, which three.js cannot parse.
+ * Resolve them to rgb through a 2D canvas before handing them to materials.
+ */
 function readToken(name: string, fallback: string) {
   if (typeof window === "undefined") return fallback;
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   if (!raw) return fallback;
   try {
-    return new THREE.Color(raw).getStyle();
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return fallback;
+    ctx.fillStyle = raw;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    return `rgb(${r}, ${g}, ${b})`;
   } catch {
     return fallback;
   }
