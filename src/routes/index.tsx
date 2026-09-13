@@ -99,7 +99,7 @@ function Landing() {
             {FEATURES.map((f) => {
               const Icon = f.icon;
               return (
-                <article key={f.title} className="panel p-5 transition-colors hover:border-primary/50">
+                <article key={f.title} className="panel tilt p-5 hover:border-primary/50">
                   <Icon className="size-5 text-primary" />
                   <h3 className="mt-4 text-base">{f.title}</h3>
                   <p className="mt-2 text-sm text-muted-foreground">{f.body}</p>
@@ -116,7 +116,7 @@ function Landing() {
               { step: "02", title: "Customise the app", body: "Icon, splash, permissions, links, add-ons, languages." },
               { step: "03", title: "Download the build", body: "Full Flutter project, ready for the Play Store and App Store." },
             ].map((s) => (
-              <div key={s.step} className="panel p-6">
+              <div key={s.step} className="panel tilt p-6">
                 <span className="font-mono text-xs text-primary">{s.step}</span>
                 <h3 className="mt-3 text-lg">{s.title}</h3>
                 <p className="mt-2 text-sm text-muted-foreground">{s.body}</p>
