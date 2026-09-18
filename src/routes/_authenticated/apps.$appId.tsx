@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
@@ -221,15 +221,28 @@ function AppEditor() {
 
       <div className="panel mt-4 flex flex-wrap items-center justify-between gap-3 p-4">
         <p className="text-xs text-muted-foreground">
-          Downloads give you the complete, ready-to-compile project. Connect a build machine to get a
-          signed <span className="font-mono">.apk</span> / <span className="font-mono">.ipa</span> straight from here.
+          {builds.data && builds.data.configured === false ? (
+            <>
+              Your build machine is not connected yet.{" "}
+              <Link to="/build-settings" className="underline">
+                Connect Codemagic and your repository
+              </Link>{" "}
+              to compile a real APK, AAB and signed IPA here.
+            </>
+          ) : (
+            <>
+              Starting a build pushes this app to your repository and compiles it on your own Codemagic
+              machine. You get an <span className="font-mono">.apk</span>,{" "}
+              <span className="font-mono">.aab</span> and signed <span className="font-mono">.ipa</span>.
+            </>
+          )}
         </p>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => build.mutate("android")} disabled={build.isPending}>
-            <Play className="mr-2 size-4" /> Cloud build APK
+            <Play className="mr-2 size-4" /> {build.isPending ? "Starting…" : "Build Android"}
           </Button>
           <Button size="sm" variant="outline" onClick={() => build.mutate("ios")} disabled={build.isPending}>
-            <Play className="mr-2 size-4" /> Cloud build iOS
+            <Play className="mr-2 size-4" /> {build.isPending ? "Starting…" : "Build iOS"}
           </Button>
         </div>
       </div>

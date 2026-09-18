@@ -143,32 +143,165 @@ export const previewFile = createServerFn({ method: "POST" })
   });
 
 /* ------------------------------------------------------------------ *
- * Codemagic build service
+ * Real cloud builds: push the project to the user's GitHub repo, then
+ * start Android + iOS builds on the user's own Codemagic machine.
  * ------------------------------------------------------------------ */
 
 const CM_API = "https://api.codemagic.io";
+const GH_API = "https://api.github.com";
 
-function cmToken() {
-  return process.env["CODEMAGIC_API_TOKEN"] ?? "";
-}
-function cmAppId() {
-  return process.env["CODEMAGIC_APP_ID"] ?? "";
-}
-function cmBranch() {
-  return process.env["CODEMAGIC_BRANCH"] || "main";
+type BuildCreds = {
+  codemagic_token: string;
+  codemagic_app_id: string;
+  codemagic_branch: string;
+  github_token: string;
+  github_repo: string;
+};
+
+async function loadCreds(supabase: any, userId: string): Promise<BuildCreds | null> {
+  const { data } = await supabase
+    .from("build_settings")
+    .select("codemagic_token,codemagic_app_id,codemagic_branch,github_token,github_repo")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data?.codemagic_token || !data?.codemagic_app_id || !data?.github_token || !data?.github_repo) {
+    return null;
+  }
+  return {
+    codemagic_token: data.codemagic_token,
+    codemagic_app_id: data.codemagic_app_id,
+    codemagic_branch: data.codemagic_branch || "main",
+    github_token: data.github_token,
+    github_repo: data.github_repo,
+  };
 }
 
-async function cmFetch(path: string, init?: RequestInit) {
+async function cmFetch(token: string, path: string, init?: RequestInit) {
   const res = await fetch(`${CM_API}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      "x-auth-token": cmToken(),
+      "x-auth-token": token,
       ...(init?.headers ?? {}),
     },
   });
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   return { ok: res.ok, status: res.status, body };
+}
+
+async function ghFetch(token: string, path: string, init?: RequestInit) {
+  const res = await fetch(`${GH_API}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "User-Agent": "nativeforge",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const body: any = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      `GitHub ${path} failed [${res.status}]: ${body?.message ?? "unknown error"}`,
+    );
+  }
+  return body;
+}
+
+function toBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function buildBranch(appId: string) {
+  return `nativeforge-${appId.slice(0, 8)}`;
+}
+
+/** Commit the whole generated project onto a dedicated branch of the user's repo. */
+async function pushProject(
+  creds: BuildCreds,
+  appId: string,
+  config: AppConfig,
+  configUrl: string,
+) {
+  const repo = creds.github_repo;
+  const branch = buildBranch(appId);
+  const files = buildFlutterProject(config, configUrl);
+
+  const icon = (await fetchPng(config.branding.iconUrl)) ?? (await placeholderPng(config.branding.iconBackground));
+  const splash =
+    (await fetchPng(config.splash.logoUrl || config.branding.iconUrl)) ??
+    (await placeholderPng(config.splash.backgroundColor));
+
+  // Binary assets need real blobs; text files can be inlined in the tree.
+  const binaries: Array<{ path: string; bytes: Uint8Array }> = [
+    { path: "assets/icon.png", bytes: icon },
+    { path: "assets/splash.png", bytes: splash },
+  ];
+
+  const tree: Array<Record<string, string>> = Object.entries(files).map(([path, content]) => ({
+    path,
+    mode: path.startsWith("tool/") || path.endsWith(".sh") ? "100755" : "100644",
+    type: "blob",
+    content,
+  }));
+
+  for (const bin of binaries) {
+    const blob = await ghFetch(creds.github_token, `/repos/${repo}/git/blobs`, {
+      method: "POST",
+      body: JSON.stringify({ content: toBase64(bin.bytes), encoding: "base64" }),
+    });
+    tree.push({ path: bin.path, mode: "100644", type: "blob", sha: blob.sha });
+  }
+
+  // Find a parent commit: the app branch if it exists, otherwise the default branch.
+  let parent = "";
+  let branchExists = false;
+  try {
+    const ref = await ghFetch(creds.github_token, `/repos/${repo}/git/ref/heads/${branch}`);
+    parent = ref.object.sha;
+    branchExists = true;
+  } catch {
+    try {
+      const fallback = await ghFetch(
+        creds.github_token,
+        `/repos/${repo}/git/ref/heads/${creds.codemagic_branch}`,
+      );
+      parent = fallback.object.sha;
+    } catch {
+      parent = "";
+    }
+  }
+
+  const treeRes = await ghFetch(creds.github_token, `/repos/${repo}/git/trees`, {
+    method: "POST",
+    body: JSON.stringify({ tree }),
+  });
+
+  const commit = await ghFetch(creds.github_token, `/repos/${repo}/git/commits`, {
+    method: "POST",
+    body: JSON.stringify({
+      message: `Build ${config.appInfo.appName} (${new Date().toISOString()})`,
+      tree: treeRes.sha,
+      parents: parent ? [parent] : [],
+    }),
+  });
+
+  if (branchExists) {
+    await ghFetch(creds.github_token, `/repos/${repo}/git/refs/heads/${branch}`, {
+      method: "PATCH",
+      body: JSON.stringify({ sha: commit.sha, force: true }),
+    });
+  } else {
+    await ghFetch(creds.github_token, `/repos/${repo}/git/refs`, {
+      method: "POST",
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }),
+    });
+  }
+
+  return { branch, commitSha: commit.sha as string };
 }
 
 /** Codemagic statuses -> our simple vocabulary. */
@@ -191,11 +324,11 @@ function pickArtefact(artefacts: Artefact[], platform: "android" | "ios") {
 }
 
 /** Turn a protected artefact URL into a link the browser can download. */
-async function publicArtefactUrl(url: string): Promise<string> {
+async function publicArtefactUrl(token: string, url: string): Promise<string> {
   try {
     const res = await fetch(`${url}/public-url`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-auth-token": cmToken() },
+      headers: { "Content-Type": "application/json", "x-auth-token": token },
       body: JSON.stringify({ expiresAt: Math.floor(Date.now() / 1000) + 60 * 60 * 24 }),
     });
     const body = (await res.json().catch(() => ({}))) as { url?: string };
@@ -205,22 +338,20 @@ async function publicArtefactUrl(url: string): Promise<string> {
   }
 }
 
+const NOT_CONFIGURED =
+  "Connect your build machine first: add your Codemagic API token, Codemagic app ID and GitHub repository in Build settings.";
+
 /**
- * Kick off a real compile on Codemagic. The generated project's `codemagic.yaml`
- * defines `android-release` (APK + AAB) and `ios-release` (signed IPA) workflows;
- * per-app settings travel with the build as environment variables.
+ * Push the generated project (with its codemagic.yaml) to the user's repo and
+ * start a real compile on their Codemagic machine.
  */
 export const startCloudBuild = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: { appId: string; platform: "android" | "ios" }) => data)
   .handler(async ({ data, context }) => {
-    if (!cmToken() || !cmAppId()) {
-      return {
-        ok: false as const,
-        reason: "not_configured" as const,
-        message:
-          "No build machine is connected yet. Add your build service credentials to compile a real APK/IPA here.",
-      };
+    const creds = await loadCreds(context.supabase, context.userId);
+    if (!creds) {
+      return { ok: false as const, reason: "not_configured" as const, message: NOT_CONFIGURED };
     }
 
     const { data: app, error } = await context.supabase
@@ -232,12 +363,23 @@ export const startCloudBuild = createServerFn({ method: "POST" })
 
     const config = mergeConfig(app.name, app.website_url, app.config);
 
-    const res = await cmFetch("/builds", {
+    let pushed: { branch: string; commitSha: string };
+    try {
+      pushed = await pushProject(creds, data.appId, config, liveConfigUrl(data.appId));
+    } catch (err) {
+      return {
+        ok: false as const,
+        reason: "repo_error" as const,
+        message: err instanceof Error ? err.message : "Could not push the project to your repository.",
+      };
+    }
+
+    const res = await cmFetch(creds.codemagic_token, "/builds", {
       method: "POST",
       body: JSON.stringify({
-        appId: cmAppId(),
+        appId: creds.codemagic_app_id,
         workflowId: data.platform === "android" ? "android-release" : "ios-release",
-        branch: cmBranch(),
+        branch: pushed.branch,
         environment: {
           variables: {
             APP_NAME: config.appInfo.appName,
@@ -259,7 +401,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
         reason: "provider_error" as const,
         message:
           (res.body["error"] as string | undefined) ||
-          `Build service returned ${res.status}. Check the connected repository and workflow names.`,
+          `Codemagic returned ${res.status}. Check that the app ID belongs to this repository and that the branch ${pushed.branch} is allowed.`,
       };
     }
 
@@ -272,7 +414,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
         status: "running",
         provider: "codemagic",
         external_id: buildId,
-        message: "Build queued",
+        message: `Queued from ${pushed.branch}`,
       })
       .select("id")
       .single();
@@ -280,8 +422,9 @@ export const startCloudBuild = createServerFn({ method: "POST" })
     return {
       ok: true as const,
       buildId,
+      branch: pushed.branch,
       rowId: row?.id ?? "",
-      message: `${data.platform === "android" ? "Android" : "iOS"} build started.`,
+      message: `${data.platform === "android" ? "Android" : "iOS"} build started on your Codemagic machine.`,
     };
   });
 
@@ -298,12 +441,13 @@ export const refreshBuilds = createServerFn({ method: "POST" })
       .limit(20);
 
     const builds = rows ?? [];
-    if (!cmToken()) return { configured: false as const, builds };
+    const creds = await loadCreds(context.supabase, context.userId);
+    if (!creds) return { configured: false as const, builds };
 
     for (const b of builds) {
       if (b.status !== "running" || !b.external_id) continue;
 
-      const res = await cmFetch(`/builds/${b.external_id}`);
+      const res = await cmFetch(creds.codemagic_token, `/builds/${b.external_id}`);
       const build = (res.body["build"] ?? {}) as {
         status?: string;
         message?: string;
@@ -316,7 +460,7 @@ export const refreshBuilds = createServerFn({ method: "POST" })
 
       if (status === "success") {
         const art = pickArtefact(build.artefacts ?? [], b.platform as "android" | "ios");
-        if (art?.url) artifactUrl = await publicArtefactUrl(art.url);
+        if (art?.url) artifactUrl = await publicArtefactUrl(creds.codemagic_token, art.url);
       }
 
       const reason = (build.message ?? "").trim();
@@ -332,7 +476,6 @@ export const refreshBuilds = createServerFn({ method: "POST" })
                 ? reason || `Build ${build.status}`
                 : `Building (${build.status})`,
         })
-
         .eq("id", b.id);
 
       b.status = status;

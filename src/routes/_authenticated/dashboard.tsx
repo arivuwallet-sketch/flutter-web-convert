@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -80,10 +80,17 @@ function Dashboard() {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-10">
-      <h1 className="font-display text-2xl">Your apps</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Point it at any website — Lovable, Webflow, WordPress, Shopify or your own custom domain.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl">Your apps</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Point it at any website — Lovable, Webflow, WordPress, Shopify or your own custom domain.
+          </p>
+        </div>
+        <Button variant="outline" asChild>
+          <Link to="/build-settings">Build machine</Link>
+        </Button>
+      </div>
 
       <div className="panel mt-6 p-5">
         <div className="grid gap-4 sm:grid-cols-[1fr_1.4fr_auto] sm:items-end">
