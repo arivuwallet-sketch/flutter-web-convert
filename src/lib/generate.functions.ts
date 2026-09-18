@@ -160,8 +160,8 @@ type BuildCreds = {
   github_repo?: string;
 };
 
-async function loadCreds(supabase: any): Promise<BuildCreds | null> {
-  const s = await readStoredSettings(supabase);
+async function loadCreds(userId: string): Promise<BuildCreds | null> {
+  const s = await readStoredSettings(userId);
   if (!s.codemagicToken || !s.codemagicAppId) return null;
   const creds: BuildCreds = {
     codemagic_token: s.codemagicToken,
@@ -348,7 +348,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: { appId: string; platform: "android" | "ios" }) => data)
   .handler(async ({ data, context }) => {
-    const creds = await loadCreds(context.supabase);
+    const creds = await loadCreds(context.userId);
     if (!creds) {
       return { ok: false as const, reason: "not_configured" as const, message: NOT_CONFIGURED };
     }
@@ -453,7 +453,7 @@ export const refreshBuilds = createServerFn({ method: "POST" })
       .limit(20);
 
     const builds = rows ?? [];
-    const creds = await loadCreds(context.supabase);
+    const creds = await loadCreds(context.userId);
     if (!creds) return { configured: false as const, builds };
 
     for (const b of builds) {

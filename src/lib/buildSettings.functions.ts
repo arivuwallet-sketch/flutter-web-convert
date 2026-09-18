@@ -25,17 +25,31 @@ export type BuildSettingsView = {
   pushEnabled: boolean;
 };
 
-export async function readStoredSettings(supabase: any): Promise<StoredBuildSettings> {
-  const { data } = await supabase.auth.getUser();
+/**
+ * The server-side Supabase client has no persisted session, so `auth.getUser()`
+ * fails with "Auth session missing!". The caller is already verified by the
+ * auth middleware, so we read/write the account record with the admin client.
+ */
+export async function readStoredSettings(userId: string): Promise<StoredBuildSettings> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
   const raw = data?.user?.user_metadata?.build_settings;
   return raw && typeof raw === "object" ? (raw as StoredBuildSettings) : {};
+}
+
+async function writeStoredSettings(userId: string, value: StoredBuildSettings | null) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    user_metadata: { build_settings: value },
+  });
+  if (error) throw new Error(error.message);
 }
 
 export const getBuildSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => data)
   .handler(async ({ context }): Promise<BuildSettingsView> => {
-    const s = await readStoredSettings(context.supabase);
+    const s = await readStoredSettings(context.userId);
     const hasCodemagicToken = Boolean(s.codemagicToken);
     const hasGithubToken = Boolean(s.githubToken);
     const codemagicAppId = s.codemagicAppId ?? "";
@@ -72,7 +86,7 @@ export const saveBuildSettings = createServerFn({ method: "POST" })
       throw new Error("Repository must look like owner/repository");
     }
 
-    const current = await readStoredSettings(context.supabase);
+    const current = await readStoredSettings(context.userId);
     const next: StoredBuildSettings = { ...current };
 
     if (data.codemagicToken?.trim()) next.codemagicToken = data.codemagicToken.trim();
@@ -84,10 +98,7 @@ export const saveBuildSettings = createServerFn({ method: "POST" })
       if (!repo) delete next.githubToken;
     }
 
-    const { error } = await context.supabase.auth.updateUser({
-      data: { build_settings: next },
-    });
-    if (error) throw new Error(error.message);
+    await writeStoredSettings(context.userId, next);
 
     return { ok: true as const };
   });
@@ -96,6 +107,6 @@ export const clearBuildSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => data)
   .handler(async ({ context }) => {
-    await context.supabase.auth.updateUser({ data: { build_settings: null } });
+    await writeStoredSettings(context.userId, null);
     return { ok: true as const };
   });
