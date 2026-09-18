@@ -59,25 +59,27 @@ function pubspec(c: AppConfig): string {
     "    sdk: flutter",
     "  flutter_localizations:",
     "    sdk: flutter",
+    // Keep this set mutually compatible: share_plus 13.x and package_info_plus
+    // 10.x both pin win32 ^6.0.1, so they must be bumped together.
     "  webview_flutter: ^4.14.1",
-    "  webview_flutter_android: ^4.10.11",
-    "  webview_flutter_wkwebview: ^3.23.5",
+    "  webview_flutter_android: ^4.14.1",
+    "  webview_flutter_wkwebview: ^3.26.1",
     "  connectivity_plus: ^7.3.1",
     "  url_launcher: ^6.3.2",
-    "  shared_preferences: ^2.3.3",
+    "  shared_preferences: ^2.5.5",
     "  package_info_plus: ^10.2.1",
-    "  intl: ^0.19.0",
-    "  http: ^1.2.2",
+    "  intl: ^0.20.3",
+    "  http: ^1.6.0",
   ];
-  if (c.addons.shareButton) deps.push("  share_plus: ^10.1.2");
-  if (c.addons.pushEnabled) deps.push("  firebase_core: ^3.8.0", "  firebase_messaging: ^15.1.5");
-  if (c.addons.analyticsEnabled) deps.push("  firebase_analytics: ^11.3.5");
-  if (c.addons.admobEnabled) deps.push("  google_mobile_ads: ^5.2.0");
-  if (c.addons.biometricLock || c.permissions.biometric) deps.push("  local_auth: ^2.3.0");
-  if (c.addons.ratingPrompt) deps.push("  in_app_review: ^2.0.10");
-  if (c.addons.qrScanner) deps.push("  mobile_scanner: ^5.2.3");
-  if (c.permissions.location || c.settings.geolocationBridge) deps.push("  geolocator: ^13.0.2");
-  if (c.settings.downloads) deps.push("  path_provider: ^2.1.5");
+  if (c.addons.shareButton) deps.push("  share_plus: ^13.3.0");
+  if (c.addons.pushEnabled) deps.push("  firebase_core: ^4.15.0", "  firebase_messaging: ^16.7.0");
+  if (c.addons.analyticsEnabled) deps.push("  firebase_analytics: ^12.6.0");
+  if (c.addons.admobEnabled) deps.push("  google_mobile_ads: ^9.1.0");
+  if (c.addons.biometricLock || c.permissions.biometric) deps.push("  local_auth: ^3.0.2");
+  if (c.addons.ratingPrompt) deps.push("  in_app_review: ^2.0.12");
+  if (c.addons.qrScanner) deps.push("  mobile_scanner: ^7.4.2");
+  if (c.permissions.location || c.settings.geolocationBridge) deps.push("  geolocator: ^14.0.3");
+  if (c.settings.downloads) deps.push("  path_provider: ^2.1.6");
   deps.push("  permission_handler: ^13.0.2");
 
   return `name: ${c.appInfo.packageId.split(".").pop() || "webapp"}_app
@@ -744,7 +746,8 @@ ${
           c.addons.shareButton
             ? `FloatingActionButton.small(
           backgroundColor: Live.accentColor,
-          onPressed: () => Share.share(Live.startUrl),
+          onPressed: () =>
+              SharePlus.instance.share(ShareParams(text: Live.startUrl)),
           child: const Icon(Icons.share),
         )`
             : "null"
@@ -917,7 +920,7 @@ function infoPlist(c: AppConfig): string {
     <key>CFBundleVersion</key>
     <string>${c.appInfo.versionCode}</string>
     <key>MinimumOSVersion</key>
-    <string>${c.appInfo.iosDeploymentTarget}</string>
+    <string>${Math.max(Number(c.appInfo.iosDeploymentTarget) || 15, 15).toFixed(1)}</string>
     <key>UIStatusBarStyle</key>
     <string>${c.branding.statusBarStyle === "light" ? "UIStatusBarStyleLightContent" : "UIStatusBarStyleDarkContent"}</string>
     <key>UIViewControllerBasedStatusBarAppearance</key>
@@ -1009,6 +1012,9 @@ function bootstrapScript(c: AppConfig): string {
   const projectName = (packageParts.pop() || "webapp").replace(/[^a-z0-9_]/gi, "_").toLowerCase();
   const organisation = packageParts.join(".") || "com.example";
   const platforms = "${1:-both}";
+  // Current Firebase / mobile_scanner / local_auth plugins require these floors.
+  const minSdk = Math.max(Number(c.appInfo.minSdk) || 23, 23);
+  const iosTarget = Math.max(Number(c.appInfo.iosDeploymentTarget) || 15, 15).toFixed(1);
 
   return `#!/usr/bin/env bash
 set -euo pipefail
@@ -1044,14 +1050,21 @@ if [[ "$requested" == "android" || "$requested" == "both" ]]; then
   fi
   gradle_file="android/app/build.gradle.kts"
   if [ -f "$gradle_file" ]; then
-    sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = ${c.appInfo.minSdk}/' "$gradle_file" && rm -f "$gradle_file.bak"
+    sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = ${minSdk}/' "$gradle_file"
+    sed -i.bak 's/minSdk = [0-9][0-9]*/minSdk = ${minSdk}/' "$gradle_file"
+    rm -f "$gradle_file.bak"
   fi
 fi
 
 if [[ "$requested" == "ios" || "$requested" == "both" ]]; then
   if [ -f "$backup_dir/Info.plist" ]; then cp "$backup_dir/Info.plist" ios/Runner/Info.plist; fi
-  sed -i.bak 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = ${c.appInfo.iosDeploymentTarget}/g' ios/Runner.xcodeproj/project.pbxproj
+  sed -i.bak 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = ${iosTarget}/g' ios/Runner.xcodeproj/project.pbxproj
   rm -f ios/Runner.xcodeproj/project.pbxproj.bak
+  if [ -f ios/Podfile ]; then
+    sed -i.bak "s/^# *platform :ios.*/platform :ios, '${iosTarget}'/" ios/Podfile
+    sed -i.bak "s/^platform :ios.*/platform :ios, '${iosTarget}'/" ios/Podfile
+    rm -f ios/Podfile.bak
+  fi
 fi
 
 echo "Modern Flutter platform files are ready for $requested."
