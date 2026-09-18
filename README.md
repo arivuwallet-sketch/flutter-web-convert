@@ -1,14 +1,20 @@
-# Welcome to your Lovable project
+# Appify Your Website
+
+You need to create a real website to flutter native mobile app converter for for all website platform mainly for lovable websites. Even the website has custom domain and it need to give the full build file in downloadable apk for Android and full build zip folder for IOS. Add full app customize and editing add everything to edit a app uploading logos, loading screen, language, settings App Info, Splash Screen, App Permissions, App Settings, Link Handling, Website Overrides, Add-ons, Language Localisation, Icon Library, Environment Variables everything should work 100% perfectly
+
+Show les
 
 This project was built with [Lovable](https://lovable.dev).
 
+**Live app**: https://flutter-web-convert.lovable.app
+
 ## Build with Lovable
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/d656f4e8-7f6b-423a-b32d-8f87e9471630).
 
 - **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+- **Stay in sync**: every change made in Lovable is committed straight to this repository.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 
@@ -20,10 +26,3 @@ cd <repository-name>
 npm i
 npm run dev
 ```
-
-## Built with
-
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
