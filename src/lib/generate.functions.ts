@@ -15,26 +15,72 @@ function safeName(s: string) {
   return (s || "app").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-async function fetchBinary(url: string): Promise<Uint8Array | null> {
+async function fetchPng(url: string): Promise<Uint8Array | null> {
   if (!url || !/^https?:\/\//.test(url)) return null;
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength > 5_000_000) return null;
-    return new Uint8Array(buf);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf.byteLength > 5_000_000 || buf.byteLength < 8) return null;
+    const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+    return pngSignature.every((byte, index) => buf[index] === byte) ? buf : null;
   } catch {
     return null;
   }
 }
 
-function placeholderSvg(color: string, glyphColor: string, letter: string) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="${color}"/>
-  <text x="256" y="330" font-family="monospace" font-size="240" font-weight="700"
-        text-anchor="middle" fill="${glyphColor}">${letter}</text>
-</svg>`;
+function crc32(data: Uint8Array) {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
+
+function pngChunk(name: string, data: Uint8Array) {
+  const type = new TextEncoder().encode(name);
+  const chunk = new Uint8Array(12 + data.length);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, data.length);
+  chunk.set(type, 4);
+  chunk.set(data, 8);
+  view.setUint32(8 + data.length, crc32(chunk.slice(4, 8 + data.length)));
+  return chunk;
+}
+
+async function placeholderPng(hex: string, size = 1024) {
+  const clean = hex.replace("#", "").padEnd(6, "0").slice(0, 6);
+  const rgb = [0, 2, 4].map((offset) => Number.parseInt(clean.slice(offset, offset + 2), 16));
+  const raw = new Uint8Array(size * (size * 4 + 1));
+  for (let y = 0; y < size; y += 1) {
+    const row = y * (size * 4 + 1);
+    for (let x = 0; x < size; x += 1) {
+      const pixel = row + 1 + x * 4;
+      raw[pixel] = rgb[0] ?? 0;
+      raw[pixel + 1] = rgb[1] ?? 0;
+      raw[pixel + 2] = rgb[2] ?? 0;
+      raw[pixel + 3] = 255;
+    }
+  }
+  const compressedStream = new Blob([raw.buffer]).stream().pipeThrough(new CompressionStream("deflate"));
+  const compressed = new Uint8Array(await new Response(compressedStream).arrayBuffer());
+  const header = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ihdr = new Uint8Array(13);
+  const view = new DataView(ihdr.buffer);
+  view.setUint32(0, size);
+  view.setUint32(4, size);
+  ihdr.set([8, 6, 0, 0, 0], 8);
+  const chunks = [header, pngChunk("IHDR", ihdr), pngChunk("IDAT", compressed), pngChunk("IEND", new Uint8Array())];
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const png = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { png.set(chunk, offset); offset += chunk.length; }
+  return png;
+}
+
 
 async function zipFor(
   config: AppConfig,
@@ -51,37 +97,11 @@ async function zipFor(
     zip.file(path, content);
   }
 
-  const icon = await fetchBinary(config.branding.iconUrl);
-  if (icon) zip.file("assets/icon.png", icon);
-  else
-    zip.file(
-      "assets/icon.svg",
-      placeholderSvg(
-        config.branding.iconBackground,
-        config.branding.accentColor,
-        (config.appInfo.appName[0] || "A").toUpperCase(),
-      ),
-    );
+  const icon = await fetchPng(config.branding.iconUrl);
+  zip.file("assets/icon.png", icon ?? (await placeholderPng(config.branding.iconBackground)));
 
-  const splash = await fetchBinary(config.splash.logoUrl || config.branding.iconUrl);
-  if (splash) zip.file("assets/splash.png", splash);
-  else
-    zip.file(
-      "assets/splash.svg",
-      placeholderSvg(
-        config.splash.backgroundColor,
-        config.branding.accentColor,
-        (config.appInfo.appName[0] || "A").toUpperCase(),
-      ),
-    );
-
-  if (!icon || !splash) {
-    zip.file(
-      "assets/README.md",
-      "Drop a 1024x1024 `icon.png` and `splash.png` in this folder before building,\n" +
-        "or upload them in the web console and regenerate. SVG placeholders are included.\n",
-    );
-  }
+  const splash = await fetchPng(config.splash.logoUrl || config.branding.iconUrl);
+  zip.file("assets/splash.png", splash ?? (await placeholderPng(config.splash.backgroundColor)));
 
   return zip.generateAsync({ type: "base64", compression: "DEFLATE" });
 }

@@ -59,13 +59,13 @@ function pubspec(c: AppConfig): string {
     "    sdk: flutter",
     "  flutter_localizations:",
     "    sdk: flutter",
-    "  webview_flutter: ^4.10.0",
-    "  webview_flutter_android: ^4.3.4",
-    "  webview_flutter_wkwebview: ^3.16.3",
-    "  connectivity_plus: ^6.1.0",
-    "  url_launcher: ^6.3.1",
+    "  webview_flutter: ^4.14.1",
+    "  webview_flutter_android: ^4.10.11",
+    "  webview_flutter_wkwebview: ^3.23.5",
+    "  connectivity_plus: ^7.3.1",
+    "  url_launcher: ^6.3.2",
     "  shared_preferences: ^2.3.3",
-    "  package_info_plus: ^8.1.1",
+    "  package_info_plus: ^10.2.1",
     "  intl: ^0.19.0",
     "  http: ^1.2.2",
   ];
@@ -78,7 +78,7 @@ function pubspec(c: AppConfig): string {
   if (c.addons.qrScanner) deps.push("  mobile_scanner: ^5.2.3");
   if (c.permissions.location || c.settings.geolocationBridge) deps.push("  geolocator: ^13.0.2");
   if (c.settings.downloads) deps.push("  path_provider: ^2.1.5");
-  deps.push("  permission_handler: ^11.3.1");
+  deps.push("  permission_handler: ^13.0.2");
 
   return `name: ${c.appInfo.packageId.split(".").pop() || "webapp"}_app
 description: ${c.appInfo.description || c.appInfo.appName}
@@ -86,7 +86,7 @@ publish_to: "none"
 version: ${c.appInfo.versionName}+${c.appInfo.versionCode}
 
 environment:
-  sdk: ">=3.4.0 <4.0.0"
+  sdk: ">=3.10.0 <4.0.0"
 
 dependencies:
 ${deps.join("\n")}
@@ -94,9 +94,9 @@ ${deps.join("\n")}
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
-  flutter_launcher_icons: ^0.14.1
-  flutter_native_splash: ^2.4.3
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.8
 
 flutter:
   uses-material-design: true
@@ -960,6 +960,7 @@ Generated from ${c.appInfo.websiteUrl}
 ## Build the Android APK
 
 \`\`\`bash
+bash tool/bootstrap.sh android
 flutter pub get
 dart run flutter_launcher_icons
 dart run flutter_native_splash:create
@@ -976,6 +977,7 @@ flutter build appbundle --release
 ## Build for iOS (needs macOS + Xcode)
 
 \`\`\`bash
+bash tool/bootstrap.sh ios
 flutter pub get
 cd ios && pod install && cd ..
 flutter build ios --release --no-codesign
@@ -1002,39 +1004,90 @@ Regenerate this project any time from the web console after changing settings.
 `;
 }
 
+function bootstrapScript(c: AppConfig): string {
+  const packageParts = c.appInfo.packageId.split(".");
+  const projectName = (packageParts.pop() || "webapp").replace(/[^a-z0-9_]/gi, "_").toLowerCase();
+  const organisation = packageParts.join(".") || "com.example";
+  const platforms = "${1:-both}";
+
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+test -f pubspec.yaml || { echo "pubspec.yaml was not found; run this script from the exported project." >&2; exit 1; }
+
+requested="${platforms}"
+case "$requested" in
+  android) flutter_platforms="android" ;;
+  ios) flutter_platforms="ios" ;;
+  both) flutter_platforms="android,ios" ;;
+  *) echo "Usage: bash tool/bootstrap.sh [android|ios|both]" >&2; exit 2 ;;
+esac
+
+backup_dir="$(mktemp -d)"
+trap 'rm -rf "$backup_dir"' EXIT
+if [ -f android/app/src/main/AndroidManifest.xml ]; then
+  cp android/app/src/main/AndroidManifest.xml "$backup_dir/AndroidManifest.xml"
+fi
+if [ -f ios/Runner/Info.plist ]; then
+  cp ios/Runner/Info.plist "$backup_dir/Info.plist"
+fi
+
+if [[ "$requested" == "android" || "$requested" == "both" ]]; then rm -rf android; fi
+if [[ "$requested" == "ios" || "$requested" == "both" ]]; then rm -rf ios; fi
+
+flutter create --platforms="$flutter_platforms" --project-name="${projectName}" --org="${organisation}" .
+
+if [[ "$requested" == "android" || "$requested" == "both" ]]; then
+  if [ -f "$backup_dir/AndroidManifest.xml" ]; then
+    cp "$backup_dir/AndroidManifest.xml" android/app/src/main/AndroidManifest.xml
+  fi
+  gradle_file="android/app/build.gradle.kts"
+  if [ -f "$gradle_file" ]; then
+    sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = ${c.appInfo.minSdk}/' "$gradle_file" && rm -f "$gradle_file.bak"
+  fi
+fi
+
+if [[ "$requested" == "ios" || "$requested" == "both" ]]; then
+  if [ -f "$backup_dir/Info.plist" ]; then cp "$backup_dir/Info.plist" ios/Runner/Info.plist; fi
+  sed -i.bak 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = ${c.appInfo.iosDeploymentTarget}/g' ios/Runner.xcodeproj/project.pbxproj
+  rm -f ios/Runner.xcodeproj/project.pbxproj.bak
+fi
+
+echo "Modern Flutter platform files are ready for $requested."
+`;
+}
+
 function codemagicYaml(c: AppConfig): string {
   return `workflows:
   android-release:
     name: ${c.appInfo.appName} Android
+    working_directory: .
     instance_type: linux_x2
     max_build_duration: 60
     environment:
       flutter: stable
       java: 17
-      groups:
-        - android_signing
     scripts:
-      - name: Keystore (optional, from the android_signing group)
+      - name: Prepare current Flutter Android project
         script: |
-          if [ -n "$CM_KEYSTORE" ]; then
-            echo $CM_KEYSTORE | base64 --decode > "$CM_BUILD_DIR/android/app/keystore.jks"
-            cat >> "$CM_BUILD_DIR/android/key.properties" <<EOF
-          storePassword=$CM_KEYSTORE_PASSWORD
-          keyPassword=$CM_KEY_PASSWORD
-          keyAlias=$CM_KEY_ALIAS
-          storeFile=keystore.jks
-          EOF
-          fi
-      - flutter pub get
-      - dart run flutter_launcher_icons
-      - dart run flutter_native_splash:create
-      - flutter build apk --release
-      - flutter build appbundle --release
+          test -f pubspec.yaml
+          bash tool/bootstrap.sh android
+          flutter doctor -v
+          flutter pub get
+          dart run flutter_launcher_icons
+          dart run flutter_native_splash:create
+          flutter analyze
+      - name: Build Android release files
+        script: |
+          flutter build apk --release
+          flutter build appbundle --release
     artifacts:
       - build/**/outputs/**/*.apk
       - build/**/outputs/**/*.aab
   ios-release:
     name: ${c.appInfo.appName} iOS
+    working_directory: .
     instance_type: mac_mini_m2
     max_build_duration: 90
     integrations:
@@ -1047,17 +1100,25 @@ function codemagicYaml(c: AppConfig): string {
         distribution_type: app_store
         bundle_identifier: ${c.appInfo.packageId}
     scripts:
-      - flutter pub get
-      - dart run flutter_launcher_icons
-      - dart run flutter_native_splash:create
+      - name: Prepare current Flutter iOS project
+        script: |
+          test -f pubspec.yaml
+          bash tool/bootstrap.sh ios
+          flutter doctor -v
+          flutter pub get
+          dart run flutter_launcher_icons
+          dart run flutter_native_splash:create
+          flutter analyze
       - name: Set up signing
         script: |
           keychain initialize
           app-store-connect fetch-signing-files "${c.appInfo.packageId}" --type IOS_APP_STORE --create
           keychain add-certificates
           xcode-project use-profiles
-      - find . -name "Podfile" -execdir pod install \\;
-      - flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
+      - name: Install iOS dependencies and build
+        script: |
+          cd ios && pod install && cd ..
+          flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
       - build/ios/archive/*.xcarchive
@@ -1081,9 +1142,13 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+      - run: test -f pubspec.yaml
+      - run: bash tool/bootstrap.sh android
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: dart run flutter_native_splash:create
+      - run: flutter analyze
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
@@ -1097,7 +1162,13 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+      - run: test -f pubspec.yaml
+      - run: bash tool/bootstrap.sh ios
       - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - run: dart run flutter_native_splash:create
+      - run: flutter analyze
       - run: flutter build ios --release --no-codesign
       - run: |
           mkdir -p build/ios-out
@@ -1124,49 +1195,6 @@ class MainActivity : FlutterActivity()
 `;
 }
 
-function gradle(c: AppConfig): string {
-  return `plugins {
-    id "com.android.application"
-    id "kotlin-android"
-    id "dev.flutter.flutter-gradle-plugin"
-}
-
-android {
-    namespace = "${c.appInfo.packageId}"
-    compileSdk = 35
-    ndkVersion = flutter.ndkVersion
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
-    defaultConfig {
-        applicationId = "${c.appInfo.packageId}"
-        minSdk = ${c.appInfo.minSdk}
-        targetSdk = 35
-        versionCode = ${c.appInfo.versionCode}
-        versionName = "${c.appInfo.versionName}"
-    }
-
-    buildTypes {
-        release {
-            signingConfig = signingConfigs.debug
-            minifyEnabled = false
-        }
-    }
-}
-
-flutter {
-    source = "../.."
-}
-`;
-}
-
 /** Full project as path -> text content. */
 export function buildFlutterProject(
   c: AppConfig,
@@ -1179,6 +1207,7 @@ export function buildFlutterProject(
     ".gitignore": "build/\n.dart_tool/\n.packages\n.flutter-plugins\n.flutter-plugins-dependencies\nios/Pods/\n",
     ".env.example": envExample(c),
     "codemagic.yaml": codemagicYaml(c),
+    "tool/bootstrap.sh": bootstrapScript(c),
     ".github/workflows/build.yml": githubWorkflow,
     "lib/main.dart": mainDart(c),
     "lib/app_config.dart": appConfigDart(c, liveConfigUrl),
@@ -1189,30 +1218,7 @@ export function buildFlutterProject(
     "android/app/src/main/AndroidManifest.xml": androidManifest(c),
     [`android/app/src/main/kotlin/${packagePath(c.appInfo.packageId)}/MainActivity.kt`]:
       mainActivity(c),
-    "android/app/build.gradle": gradle(c),
-    "android/settings.gradle": `pluginManagement {
-    includeBuild("\${System.getenv('FLUTTER_ROOT')}/packages/flutter_tools/gradle")
-    repositories { google(); mavenCentral(); gradlePluginPortal() }
-}
-
-plugins {
-    id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-    id "com.android.application" version "8.6.0" apply false
-    id "org.jetbrains.kotlin.android" version "1.9.24" apply false
-}
-
-include ":app"
-`,
-    "android/gradle.properties": "org.gradle.jvmargs=-Xmx4G\nandroid.useAndroidX=true\nandroid.enableJetifier=true\n",
     "ios/Runner/Info.plist": infoPlist(c),
-    "ios/Podfile": `platform :ios, '${c.appInfo.iosDeploymentTarget}'
-ENV['COCOAPODS_DISABLE_STATS'] = 'true'
-
-target 'Runner' do
-  use_frameworks!
-  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-end
-`,
     "web/manifest.json": JSON.stringify(
       {
         name: c.appInfo.appName,
