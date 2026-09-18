@@ -83,8 +83,10 @@ function BuildSettingsPage() {
           <div>
             <h1 className="font-display text-xl">Build machine</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Your apps are pushed to your own repository and compiled on your own Codemagic machine,
-              so the APK, AAB and signed IPA belong entirely to you.
+              Your apps are compiled on your own Codemagic machine, so the APK, AAB and signed IPA
+              belong entirely to you. Adding a GitHub repository is optional — with one, each app is
+              pushed there before building; without one, Codemagic builds the repository it is already
+              linked to.
             </p>
           </div>
           <Badge variant={ready ? "default" : "secondary"} className="shrink-0">
@@ -126,12 +128,12 @@ function BuildSettingsPage() {
               className="bg-background"
             />
             <p className="text-xs text-muted-foreground">
-              The long ID in your Codemagic app URL, for the app linked to the repository below.
+              The long ID in your Codemagic app URL.
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="gh-repo">GitHub repository</Label>
+            <Label htmlFor="gh-repo">GitHub repository (optional)</Label>
             <Input
               id="gh-repo"
               placeholder="owner/repository"
@@ -139,10 +141,13 @@ function BuildSettingsPage() {
               onChange={(e) => setGithubRepo(e.target.value)}
               className="bg-background"
             />
+            <p className="text-xs text-muted-foreground">
+              Leave empty to skip pushing and just build what is already in your Codemagic app.
+            </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="gh-token">GitHub token</Label>
+            <Label htmlFor="gh-token">GitHub token (optional)</Label>
             <Input
               id="gh-token"
               type="password"
@@ -163,7 +168,8 @@ function BuildSettingsPage() {
               className="bg-background"
             />
             <p className="text-xs text-muted-foreground">
-              Each app is pushed to its own branch based on this one, so nothing else in the repository is overwritten.
+              With a repository connected, each app gets its own branch based on this one, so nothing else
+              is overwritten. Without one, this is the branch Codemagic builds.
             </p>
           </div>
 

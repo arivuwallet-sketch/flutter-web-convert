@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { readStoredSettings } from "@/lib/buildSettings.functions";
 import { mergeConfig, type AppConfig } from "./appConfig";
 import { buildFlutterProject } from "./flutterProject";
 
@@ -154,26 +155,24 @@ type BuildCreds = {
   codemagic_token: string;
   codemagic_app_id: string;
   codemagic_branch: string;
-  github_token: string;
-  github_repo: string;
+  /** Optional: when set, the generated project is pushed to GitHub first. */
+  github_token?: string;
+  github_repo?: string;
 };
 
-async function loadCreds(supabase: any, userId: string): Promise<BuildCreds | null> {
-  const { data } = await supabase
-    .from("build_settings")
-    .select("codemagic_token,codemagic_app_id,codemagic_branch,github_token,github_repo")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (!data?.codemagic_token || !data?.codemagic_app_id || !data?.github_token || !data?.github_repo) {
-    return null;
-  }
-  return {
-    codemagic_token: data.codemagic_token,
-    codemagic_app_id: data.codemagic_app_id,
-    codemagic_branch: data.codemagic_branch || "main",
-    github_token: data.github_token,
-    github_repo: data.github_repo,
+async function loadCreds(supabase: any): Promise<BuildCreds | null> {
+  const s = await readStoredSettings(supabase);
+  if (!s.codemagicToken || !s.codemagicAppId) return null;
+  const creds: BuildCreds = {
+    codemagic_token: s.codemagicToken,
+    codemagic_app_id: s.codemagicAppId,
+    codemagic_branch: s.codemagicBranch || "main",
   };
+  if (s.githubToken && s.githubRepo) {
+    creds.github_token = s.githubToken;
+    creds.github_repo = s.githubRepo;
+  }
+  return creds;
 }
 
 async function cmFetch(token: string, path: string, init?: RequestInit) {
@@ -221,7 +220,7 @@ function buildBranch(appId: string) {
 
 /** Commit the whole generated project onto a dedicated branch of the user's repo. */
 async function pushProject(
-  creds: BuildCreds,
+  creds: BuildCreds & { github_token: string; github_repo: string },
   appId: string,
   config: AppConfig,
   configUrl: string,
@@ -339,7 +338,7 @@ async function publicArtefactUrl(token: string, url: string): Promise<string> {
 }
 
 const NOT_CONFIGURED =
-  "Connect your build machine first: add your Codemagic API token, Codemagic app ID and GitHub repository in Build settings.";
+  "Connect your build machine first: add your Codemagic API token and app ID in Build settings. A GitHub repository is optional.";
 
 /**
  * Push the generated project (with its codemagic.yaml) to the user's repo and
@@ -349,7 +348,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: { appId: string; platform: "android" | "ios" }) => data)
   .handler(async ({ data, context }) => {
-    const creds = await loadCreds(context.supabase, context.userId);
+    const creds = await loadCreds(context.supabase);
     if (!creds) {
       return { ok: false as const, reason: "not_configured" as const, message: NOT_CONFIGURED };
     }
@@ -363,15 +362,27 @@ export const startCloudBuild = createServerFn({ method: "POST" })
 
     const config = mergeConfig(app.name, app.website_url, app.config);
 
-    let pushed: { branch: string; commitSha: string };
-    try {
-      pushed = await pushProject(creds, data.appId, config, liveConfigUrl(data.appId));
-    } catch (err) {
-      return {
-        ok: false as const,
-        reason: "repo_error" as const,
-        message: err instanceof Error ? err.message : "Could not push the project to your repository.",
-      };
+    // Pushing the generated project to GitHub is optional. Without a repo and
+    // token we simply build the branch already linked to the Codemagic app.
+    let branch = creds.codemagic_branch;
+    let pushedToRepo = false;
+    if (creds.github_token && creds.github_repo) {
+      try {
+        const pushed = await pushProject(
+          creds as BuildCreds & { github_token: string; github_repo: string },
+          data.appId,
+          config,
+          liveConfigUrl(data.appId),
+        );
+        branch = pushed.branch;
+        pushedToRepo = true;
+      } catch (err) {
+        return {
+          ok: false as const,
+          reason: "repo_error" as const,
+          message: err instanceof Error ? err.message : "Could not push the project to your repository.",
+        };
+      }
     }
 
     const res = await cmFetch(creds.codemagic_token, "/builds", {
@@ -379,7 +390,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
       body: JSON.stringify({
         appId: creds.codemagic_app_id,
         workflowId: data.platform === "android" ? "android-release" : "ios-release",
-        branch: pushed.branch,
+        branch,
         environment: {
           variables: {
             APP_NAME: config.appInfo.appName,
@@ -401,7 +412,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
         reason: "provider_error" as const,
         message:
           (res.body["error"] as string | undefined) ||
-          `Codemagic returned ${res.status}. Check that the app ID belongs to this repository and that the branch ${pushed.branch} is allowed.`,
+          `Codemagic returned ${res.status}. Check that the app ID belongs to this repository and that the branch ${branch} is allowed.`,
       };
     }
 
@@ -414,7 +425,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
         status: "running",
         provider: "codemagic",
         external_id: buildId,
-        message: `Queued from ${pushed.branch}`,
+        message: `Queued from ${branch}`,
       })
       .select("id")
       .single();
@@ -422,7 +433,8 @@ export const startCloudBuild = createServerFn({ method: "POST" })
     return {
       ok: true as const,
       buildId,
-      branch: pushed.branch,
+      branch,
+      pushedToRepo,
       rowId: row?.id ?? "",
       message: `${data.platform === "android" ? "Android" : "iOS"} build started on your Codemagic machine.`,
     };
@@ -441,7 +453,7 @@ export const refreshBuilds = createServerFn({ method: "POST" })
       .limit(20);
 
     const builds = rows ?? [];
-    const creds = await loadCreds(context.supabase, context.userId);
+    const creds = await loadCreds(context.supabase);
     if (!creds) return { configured: false as const, builds };
 
     for (const b of builds) {
