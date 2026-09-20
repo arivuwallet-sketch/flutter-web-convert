@@ -88,7 +88,7 @@ publish_to: "none"
 version: ${c.appInfo.versionName}+${c.appInfo.versionCode}
 
 environment:
-  sdk: ">=3.10.0 <4.0.0"
+  sdk: ">=3.13.0 <4.0.0"
 
 dependencies:
 ${deps.join("\n")}
@@ -575,7 +575,9 @@ ${c.addons.biometricLock ? "    _authenticate();\n" : ""}  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _syncLive();
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_syncLive(forceWebRefresh: true));
+    }
   }
 
   /// Pulls the newest settings published from the web console and applies them
@@ -586,10 +588,15 @@ ${c.addons.biometricLock ? "    _authenticate();\n" : ""}  }
     _syncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncLive());
   }
 
-  Future<void> _syncLive() async {
-    if (!AppConfig.liveSync) return;
+  Future<void> _syncLive({bool forceWebRefresh = false}) async {
+    if (!AppConfig.liveSync) {
+      if (forceWebRefresh && mounted) {
+        _controller.loadRequest(Uri.parse(Live.freshUrl(AppConfig.startUrl)));
+      }
+      return;
+    }
     final changed = await Live.refresh();
-    if (!changed || !mounted) return;
+    if ((!changed && !forceWebRefresh) || !mounted) return;
     setState(() {});
     _controller.loadRequest(Uri.parse(Live.freshUrl(Live.startUrl)));
   }
@@ -657,7 +664,7 @@ ${
             ua,
       );
     }
-    _controller.loadRequest(Uri.parse(Live.startUrl));
+    _controller.loadRequest(Uri.parse(Live.freshUrl(Live.startUrl)));
   }
 
   void _inject() {
@@ -1013,7 +1020,7 @@ function bootstrapScript(c: AppConfig): string {
   const organisation = packageParts.join(".") || "com.example";
   const platforms = "${1:-both}";
   // Current Firebase / mobile_scanner / local_auth plugins require these floors.
-  const minSdk = Math.max(Number(c.appInfo.minSdk) || 23, 23);
+  const minSdk = Math.max(Number(c.appInfo.minSdk) || 24, 24);
   const iosTarget = Math.max(Number(c.appInfo.iosDeploymentTarget) || 15, 15).toFixed(1);
 
   return `#!/usr/bin/env bash
@@ -1050,10 +1057,37 @@ if [[ "$requested" == "android" || "$requested" == "both" ]]; then
   fi
   gradle_file="android/app/build.gradle.kts"
   if [ -f "$gradle_file" ]; then
-    sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = ${minSdk}/' "$gradle_file"
-    sed -i.bak 's/minSdk = [0-9][0-9]*/minSdk = ${minSdk}/' "$gradle_file"
+    sed -i.bak -E 's/^([[:space:]]*)minSdk[[:space:]]*=.*$/\1minSdk = ${minSdk}/' "$gradle_file"
+    sed -i.bak -E 's/^([[:space:]]*)compileSdk[[:space:]]*=.*$/\1compileSdk = 36/' "$gradle_file"
+    sed -i.bak -E 's/^([[:space:]]*)targetSdk[[:space:]]*=.*$/\1targetSdk = 36/' "$gradle_file"
     rm -f "$gradle_file.bak"
   fi
+
+  # Flutter 3.47+ supports built-in Kotlin, but current plugin ecosystems
+  # still contain packages that apply the legacy Kotlin Gradle Plugin. Keep
+  # this compatibility mode enabled for generated apps.
+  gradle_props="android/gradle.properties"
+  touch "$gradle_props"
+  if grep -q '^android.builtInKotlin=' "$gradle_props"; then
+    sed -i.bak 's/^android.builtInKotlin=.*/android.builtInKotlin=false/' "$gradle_props"
+  else
+    printf '\nandroid.builtInKotlin=false\n' >> "$gradle_props"
+  fi
+  if grep -q '^android.newDsl=' "$gradle_props"; then
+    sed -i.bak 's/^android.newDsl=.*/android.newDsl=false/' "$gradle_props"
+  else
+    printf 'android.newDsl=false\n' >> "$gradle_props"
+  fi
+  rm -f "$gradle_props.bak"
+
+  # Flutter v1 Android embedding was removed in Flutter 3.29. Fail early
+  # with a clear message if an obsolete reference ever enters the tree.
+  if grep -R "io\.flutter\.app\." android/app/src/main 2>/dev/null; then
+    echo "ERROR: Android v1 embedding reference detected." >&2
+    exit 1
+  fi
+  grep -R -q "io\.flutter\.embedding\.android\.FlutterActivity" android/app/src/main \
+    || { echo "ERROR: Android embedding v2 MainActivity was not generated." >&2; exit 1; }
 fi
 
 if [[ "$requested" == "ios" || "$requested" == "both" ]]; then
@@ -1079,8 +1113,9 @@ function codemagicYaml(c: AppConfig): string {
     instance_type: linux_x2
     max_build_duration: 60
     environment:
-      flutter: stable
+      flutter: 3.47.3
       java: 17
+      ndk: 28.2.13676358
     scripts:
       - name: Prepare current Flutter Android project
         script: |
@@ -1106,7 +1141,7 @@ function codemagicYaml(c: AppConfig): string {
     integrations:
       app_store_connect: codemagic
     environment:
-      flutter: stable
+      flutter: 3.47.3
       xcode: latest
       cocoapods: default
       ios_signing:
@@ -1154,7 +1189,7 @@ jobs:
           java-version: "17"
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: "3.47.3"
           cache: true
       - run: test -f pubspec.yaml
       - run: bash tool/bootstrap.sh android
