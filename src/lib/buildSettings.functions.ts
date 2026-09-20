@@ -1,6 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import {
+  readStoredSettings,
+  writeStoredSettings,
+} from "./buildSettings.server";
 
 /**
  * Build-machine credentials are kept on the signed-in user's own account
@@ -26,52 +29,10 @@ export type BuildSettingsView = {
   pushEnabled: boolean;
 };
 
-/**
- * The server-side Supabase client has no persisted session, so `auth.getUser()`
- * and `auth.updateUser()` fail with "Auth session missing!". The caller's own
- * access token is on the request, so we talk to the auth API with it directly —
- * no service-role key required.
- */
-function authApi() {
-  const url = process.env["SUPABASE_URL"];
-  const key = process.env["SUPABASE_PUBLISHABLE_KEY"];
-  if (!url || !key) throw new Error("Supabase is not configured");
-  const header = getRequest()?.headers.get("authorization") ?? "";
-  const token = header.replace(/^Bearer /, "");
-  if (!token) throw new Error("Unauthorized");
-  return { url: `${url}/auth/v1/user`, key, token };
-}
-
-async function callAuth(method: "GET" | "PUT", body?: unknown) {
-  const { url, key, token } = authApi();
-  const res = await fetch(url, {
-    method,
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(text || `Auth request failed (${res.status})`);
-  return text ? JSON.parse(text) : {};
-}
-
-export async function readStoredSettings(_userId?: string): Promise<StoredBuildSettings> {
-  const user = await callAuth("GET");
-  const raw = user?.user_metadata?.build_settings;
-  return raw && typeof raw === "object" ? (raw as StoredBuildSettings) : {};
-}
-
-async function writeStoredSettings(value: StoredBuildSettings | null) {
-  await callAuth("PUT", { data: { build_settings: value } });
-}
-
 export const getBuildSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data: unknown) => data)
-  .handler(async ({ context }): Promise<BuildSettingsView> => {
+  .handler(async (): Promise<BuildSettingsView> => {
     const s = await readStoredSettings();
     const hasCodemagicToken = Boolean(s.codemagicToken);
     const hasGithubToken = Boolean(s.githubToken);
@@ -100,7 +61,7 @@ export const saveBuildSettings = createServerFn({ method: "POST" })
       githubRepo?: string;
     }) => data,
   )
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data }) => {
     const repo = (data.githubRepo ?? "")
       .trim()
       .replace(/^https?:\/\/github\.com\//i, "")
@@ -129,7 +90,7 @@ export const saveBuildSettings = createServerFn({ method: "POST" })
 export const clearBuildSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data: unknown) => data)
-  .handler(async ({ context }) => {
+  .handler(async () => {
     await writeStoredSettings(null);
     return { ok: true as const };
   });
