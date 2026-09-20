@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { loadBuildCreds } from "./generate.server";
-import { publicLiveConfigUrl } from "./generate.server";
+import { loadBuildCreds, publicLiveConfigUrl } from "./generate.server";
 import { mergeConfig, type AppConfig } from "./appConfig";
 import { buildFlutterProject } from "./flutterProject";
 
