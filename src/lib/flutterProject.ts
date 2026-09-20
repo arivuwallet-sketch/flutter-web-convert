@@ -1209,7 +1209,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: "3.47.3"
           cache: true
       - run: test -f pubspec.yaml
       - run: bash tool/bootstrap.sh ios
