@@ -1057,9 +1057,9 @@ if [[ "$requested" == "android" || "$requested" == "both" ]]; then
   fi
   gradle_file="android/app/build.gradle.kts"
   if [ -f "$gradle_file" ]; then
-    sed -i.bak -E 's/^([[:space:]]*)minSdk[[:space:]]*=.*$/\1minSdk = ${minSdk}/' "$gradle_file"
-    sed -i.bak -E 's/^([[:space:]]*)compileSdk[[:space:]]*=.*$/\1compileSdk = 36/' "$gradle_file"
-    sed -i.bak -E 's/^([[:space:]]*)targetSdk[[:space:]]*=.*$/\1targetSdk = 36/' "$gradle_file"
+    sed -i.bak -E 's/^([[:space:]]*)minSdk[[:space:]]*=.*$/\\1minSdk = ${minSdk}/' "$gradle_file"
+    sed -i.bak -E 's/^([[:space:]]*)compileSdk[[:space:]]*=.*$/\\1compileSdk = 36/' "$gradle_file"
+    sed -i.bak -E 's/^([[:space:]]*)targetSdk[[:space:]]*=.*$/\\1targetSdk = 36/' "$gradle_file"
     rm -f "$gradle_file.bak"
   fi
 
@@ -1082,11 +1082,11 @@ if [[ "$requested" == "android" || "$requested" == "both" ]]; then
 
   # Flutter v1 Android embedding was removed in Flutter 3.29. Fail early
   # with a clear message if an obsolete reference ever enters the tree.
-  if grep -R "io\.flutter\.app\." android/app/src/main 2>/dev/null; then
+  if grep -R "io\\.flutter\\.app\\." android/app/src/main 2>/dev/null; then
     echo "ERROR: Android v1 embedding reference detected." >&2
     exit 1
   fi
-  grep -R -q "io\.flutter\.embedding\.android\.FlutterActivity" android/app/src/main \
+  grep -R -q "io\\.flutter\\.embedding\\.android\\.FlutterActivity" android/app/src/main \
     || { echo "ERROR: Android embedding v2 MainActivity was not generated." >&2; exit 1; }
 fi
 
