@@ -1,16 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { readStoredSettings } from "@/lib/buildSettings.functions";
+import { readStoredSettings } from "./buildSettings.server";
+import { publicLiveConfigUrl } from "./generate.server";
 import { mergeConfig, type AppConfig } from "./appConfig";
 import { buildFlutterProject } from "./flutterProject";
 
 /** Public settings feed baked into the generated app so edits reach phones live. */
-function liveConfigUrl(appId: string) {
-  const configured = process.env["PUBLIC_SITE_URL"];
-  const origin = configured || new URL(getRequest().url).origin;
-  return `${origin.replace(/\/$/, "")}/api/public/app-config/${appId}`;
-}
 
 function safeName(s: string) {
   return (s || "app").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -119,7 +114,7 @@ export const generateProject = createServerFn({ method: "POST" })
     if (error || !app) throw new Error("App not found");
 
     const config = mergeConfig(app.name, app.website_url, app.config);
-    const base64 = await zipFor(config, data.platform, liveConfigUrl(data.appId));
+    const base64 = await zipFor(config, data.platform, publicLiveConfigUrl(data.appId));
     const suffix =
       data.platform === "android" ? "android" : data.platform === "ios" ? "ios" : "full";
     return {
@@ -139,7 +134,7 @@ export const previewFile = createServerFn({ method: "POST" })
       .single();
     if (error || !app) throw new Error("App not found");
     const config = mergeConfig(app.name, app.website_url, app.config);
-    const files = buildFlutterProject(config, liveConfigUrl(data.appId));
+    const files = buildFlutterProject(config, publicLiveConfigUrl(data.appId));
     return { paths: Object.keys(files).sort(), content: files[data.path] ?? "" };
   });
 
@@ -372,7 +367,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
           creds as BuildCreds & { github_token: string; github_repo: string },
           data.appId,
           config,
-          liveConfigUrl(data.appId),
+          publicLiveConfigUrl(data.appId),
         );
         branch = pushed.branch;
         pushedToRepo = true;
@@ -399,7 +394,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
             WEBSITE_URL: config.appInfo.websiteUrl,
             APP_VERSION: config.appInfo.versionName,
             BUILD_NUMBER: String(config.appInfo.versionCode),
-            LIVE_CONFIG_URL: liveConfigUrl(data.appId),
+            LIVE_CONFIG_URL: publicLiveConfigUrl(data.appId),
           },
         },
       }),
