@@ -26,16 +26,16 @@ async function callAuth(method: "GET" | "PUT", body?: unknown) {
   return text ? JSON.parse(text) : {};
 }
 
-export async function readStoredSettings(): Promise<import("./buildSettings.functions").StoredBuildSettings> {
+export async function readStoredSettings(): Promise<import("./buildSettings.types").StoredBuildSettings> {
   const user = await callAuth("GET");
   const raw = user?.user_metadata?.build_settings;
   return raw && typeof raw === "object"
-    ? (raw as import("./buildSettings.functions").StoredBuildSettings)
+    ? (raw as import("./buildSettings.types").StoredBuildSettings)
     : {};
 }
 
 export async function writeStoredSettings(
-  value: import("./buildSettings.functions").StoredBuildSettings | null,
+  value: import("./buildSettings.types").StoredBuildSettings | null,
 ) {
   await callAuth("PUT", { data: { build_settings: value } });
 }
