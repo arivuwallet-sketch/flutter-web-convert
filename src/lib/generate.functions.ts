@@ -109,7 +109,7 @@ async function zipFor(
 
 export const generateProject = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { appId: string; platform: "android" | "ios" | "both" }) => data)
+  .validator((data: { appId: string; platform: "android" | "ios" | "both" }) => data)
   .handler(async ({ data, context }) => {
     const { data: app, error } = await context.supabase
       .from("apps")
@@ -130,7 +130,7 @@ export const generateProject = createServerFn({ method: "POST" })
 
 export const previewFile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { appId: string; path: string }) => data)
+  .validator((data: { appId: string; path: string }) => data)
   .handler(async ({ data, context }) => {
     const { data: app, error } = await context.supabase
       .from("apps")
@@ -346,7 +346,7 @@ const NOT_CONFIGURED =
  */
 export const startCloudBuild = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { appId: string; platform: "android" | "ios" }) => data)
+  .validator((data: { appId: string; platform: "android" | "ios" }) => data)
   .handler(async ({ data, context }) => {
     const creds = await loadCreds(context.userId);
     if (!creds) {
@@ -443,7 +443,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
 /** Poll Codemagic for every unfinished build of an app and sync our records. */
 export const refreshBuilds = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: { appId: string }) => data)
+  .validator((data: { appId: string }) => data)
   .handler(async ({ data, context }) => {
     const { data: rows } = await context.supabase
       .from("builds")
