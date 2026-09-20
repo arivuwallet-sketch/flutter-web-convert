@@ -192,8 +192,8 @@ export function defaultConfig(name: string, websiteUrl: string): AppConfig {
       description: `${name} mobile app`,
       company: "",
       supportEmail: "",
-      minSdk: 23,
-      iosDeploymentTarget: "13.0",
+      minSdk: 24,
+      iosDeploymentTarget: "15.0",
     },
     branding: {
       iconMode: "library",
