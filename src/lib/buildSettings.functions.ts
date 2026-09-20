@@ -70,7 +70,7 @@ async function writeStoredSettings(value: StoredBuildSettings | null) {
 
 export const getBuildSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => data)
+  .validator((data: unknown) => data)
   .handler(async ({ context }): Promise<BuildSettingsView> => {
     const s = await readStoredSettings();
     const hasCodemagicToken = Boolean(s.codemagicToken);
@@ -91,7 +91,7 @@ export const getBuildSettings = createServerFn({ method: "POST" })
 
 export const saveBuildSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     (data: {
       codemagicToken?: string;
       codemagicAppId?: string;
@@ -128,7 +128,7 @@ export const saveBuildSettings = createServerFn({ method: "POST" })
 
 export const clearBuildSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => data)
+  .validator((data: unknown) => data)
   .handler(async ({ context }) => {
     await writeStoredSettings(null);
     return { ok: true as const };
