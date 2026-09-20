@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { readStoredSettings } from "./buildSettings.server";
+import { loadBuildCreds } from "./generate.server";
 import { publicLiveConfigUrl } from "./generate.server";
 import { mergeConfig, type AppConfig } from "./appConfig";
 import { buildFlutterProject } from "./flutterProject";
@@ -155,20 +155,6 @@ type BuildCreds = {
   github_repo?: string;
 };
 
-async function loadCreds(userId: string): Promise<BuildCreds | null> {
-  const s = await readStoredSettings(userId);
-  if (!s.codemagicToken || !s.codemagicAppId) return null;
-  const creds: BuildCreds = {
-    codemagic_token: s.codemagicToken,
-    codemagic_app_id: s.codemagicAppId,
-    codemagic_branch: s.codemagicBranch || "main",
-  };
-  if (s.githubToken && s.githubRepo) {
-    creds.github_token = s.githubToken;
-    creds.github_repo = s.githubRepo;
-  }
-  return creds;
-}
 
 async function cmFetch(token: string, path: string, init?: RequestInit) {
   const res = await fetch(`${CM_API}${path}`, {
@@ -343,7 +329,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data: { appId: string; platform: "android" | "ios" }) => data)
   .handler(async ({ data, context }) => {
-    const creds = await loadCreds(context.userId);
+    const creds = await loadBuildCreds(context.userId);
     if (!creds) {
       return { ok: false as const, reason: "not_configured" as const, message: NOT_CONFIGURED };
     }
@@ -448,7 +434,7 @@ export const refreshBuilds = createServerFn({ method: "POST" })
       .limit(20);
 
     const builds = rows ?? [];
-    const creds = await loadCreds(context.userId);
+    const creds = await loadBuildCreds(context.userId);
     if (!creds) return { configured: false as const, builds };
 
     for (const b of builds) {
