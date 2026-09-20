@@ -1,22 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import {
-  readStoredSettings,
-  writeStoredSettings,
-} from "./buildSettings.server";
+import { readStoredSettings, writeStoredSettings } from "./buildSettings.server";
+import type { StoredBuildSettings } from "./buildSettings.types";
 
 /**
  * Build-machine credentials are kept on the signed-in user's own account
  * record, so no extra table (and no migration) is needed.
  */
-export type StoredBuildSettings = {
-  codemagicToken?: string;
-  codemagicAppId?: string;
-  codemagicBranch?: string;
-  githubToken?: string;
-  githubRepo?: string;
-};
-
 export type BuildSettingsView = {
   hasCodemagicToken: boolean;
   hasGithubToken: boolean;
