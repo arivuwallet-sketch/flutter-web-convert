@@ -1,15 +1,5 @@
 import { getRequest } from "@tanstack/react-start/server";
 
-export function currentRequestOrigin(): string {
-  return new URL(getRequest().url).origin;
-}
-
-export function publicLiveConfigUrl(appId: string): string {
-  const configured = process.env["PUBLIC_SITE_URL"];
-  const origin = configured || currentRequestOrigin();
-  return `${origin.replace(/\/$/, "")}/api/public/app-config/${appId}`;
-}
-
 function authApi() {
   const url = process.env["SUPABASE_URL"];
   const key = process.env["SUPABASE_PUBLISHABLE_KEY"];
