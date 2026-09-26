@@ -4,9 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { mergeConfig, type AppConfig } from "@/lib/appConfig";
+import { mergeConfig, validateConfig, type AppConfig } from "@/lib/appConfig";
 import { buildFlutterProject } from "@/lib/flutterProject";
-import { generateProject, refreshBuilds, startCloudBuild } from "@/lib/generate.functions";
+import {
+  generateProject,
+  refreshBuilds,
+  startCloudBuild,
+  getBuildArtifacts,
+} from "@/lib/generate.functions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -48,7 +53,8 @@ export const Route = createFileRoute("/_authenticated/apps/$appId")({
       { title: "App editor — NativeForge" },
       {
         name: "description",
-        content: "Customise icon, splash screen, permissions, links and add-ons, then export the build.",
+        content:
+          "Customise icon, splash screen, permissions, links and add-ons, then export the build.",
       },
       { property: "og:title", content: "App editor — NativeForge" },
       { property: "og:description", content: "Customise and export your native mobile app." },
@@ -126,6 +132,7 @@ function AppEditor() {
 
   const save = useMutation({
     mutationFn: async (next: AppConfig) => {
+      validateConfig(next);
       const { error } = await supabase
         .from("apps")
         .update({
@@ -146,10 +153,15 @@ function AppEditor() {
 
   const liveConfigUrl =
     typeof window === "undefined" ? "" : `${window.location.origin}/api/public/app-config/${appId}`;
-  const files = useMemo(
-    () => (config ? buildFlutterProject(config, liveConfigUrl) : {}),
-    [config, liveConfigUrl],
-  );
+  const files = useMemo((): Record<string, string> => {
+    try {
+      return config ? buildFlutterProject(config, liveConfigUrl) : {};
+    } catch (error) {
+      return {
+        "Configuration error": error instanceof Error ? error.message : "Check app settings",
+      };
+    }
+  }, [config, liveConfigUrl]);
 
   const download = useMutation({
     mutationFn: async (platform: "android" | "ios" | "both") => {
@@ -160,7 +172,8 @@ function AppEditor() {
       downloadBase64Zip(res.filename, res.base64);
       toast.success("Build package downloaded");
     },
-    onError: () => toast.error("Could not build the package"),
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Could not build the package"),
   });
 
   const build = useMutation({
@@ -173,7 +186,8 @@ function AppEditor() {
       else toast.warning(res.message);
       builds.refetch();
     },
-    onError: () => toast.error("Could not reach the build service"),
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Could not reach the build service"),
   });
 
   const patch = (fn: (c: AppConfig) => AppConfig) => {
@@ -203,17 +217,40 @@ function AppEditor() {
           {dirty ? <Badge variant="outline">Unsaved</Badge> : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => save.mutate(config)} disabled={save.isPending}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => save.mutate(config)}
+            disabled={save.isPending}
+          >
             <Save className="mr-2 size-4" /> Save
           </Button>
-          <Button size="sm" onClick={() => download.mutate("android")} disabled={download.isPending}>
-            {download.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4" />}
+          <Button
+            size="sm"
+            onClick={() => download.mutate("android")}
+            disabled={download.isPending}
+          >
+            {download.isPending ? (
+              <Loader2 className="mr-2 size-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 size-4" />
+            )}
             Android package
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => download.mutate("ios")} disabled={download.isPending}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => download.mutate("ios")}
+            disabled={download.isPending}
+          >
             <Download className="mr-2 size-4" /> iOS package
           </Button>
-          <Button size="sm" variant="outline" onClick={() => download.mutate("both")} disabled={download.isPending}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => download.mutate("both")}
+            disabled={download.isPending}
+          >
             <Download className="mr-2 size-4" /> Full project
           </Button>
         </div>
@@ -231,17 +268,28 @@ function AppEditor() {
             </>
           ) : (
             <>
-              Starting a build pushes this app to your repository and compiles it on your own Codemagic
-              machine. You get an <span className="font-mono">.apk</span>,{" "}
-              <span className="font-mono">.aab</span> and signed <span className="font-mono">.ipa</span>.
+              Starting a build pushes this app to your repository and compiles it on your own
+              Codemagic machine. You get an <span className="font-mono">.apk</span>,{" "}
+              <span className="font-mono">.aab</span> and signed{" "}
+              <span className="font-mono">.ipa</span>.
             </>
           )}
         </p>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => build.mutate("android")} disabled={build.isPending}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => build.mutate("android")}
+            disabled={build.isPending}
+          >
             <Play className="mr-2 size-4" /> {build.isPending ? "Starting…" : "Build Android"}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => build.mutate("ios")} disabled={build.isPending}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => build.mutate("ios")}
+            disabled={build.isPending}
+          >
             <Play className="mr-2 size-4" /> {build.isPending ? "Starting…" : "Build iOS"}
           </Button>
         </div>
@@ -273,14 +321,8 @@ function AppEditor() {
                     {new Date(b.created_at).toLocaleString()}
                   </span>
                 </span>
-                {b.status === "success" && b.artifact_url ? (
-                  <a
-                    href={b.artifact_url}
-                    className="inline-flex items-center gap-1 text-primary underline"
-                  >
-                    <Download className="size-3" />
-                    Download {b.platform === "android" ? "APK" : "IPA"}
-                  </a>
+                {b.status === "success" ? (
+                  <BuildDownloads buildId={b.id} />
                 ) : b.status === "running" ? (
                   <Loader2 className="size-3 animate-spin text-muted-foreground" />
                 ) : null}
@@ -333,7 +375,9 @@ function AppEditor() {
                       key={path}
                       onClick={() => setSelectedFile(path)}
                       className={`block w-full truncate rounded px-2 py-1 text-left font-mono text-xs ${
-                        selectedFile === path ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
+                        selectedFile === path
+                          ? "bg-primary/15 text-primary"
+                          : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       {path}
@@ -348,5 +392,36 @@ function AppEditor() {
         </section>
       </div>
     </main>
+  );
+}
+
+function BuildDownloads({ buildId }: { buildId: string }) {
+  const getArtifacts = useServerFn(getBuildArtifacts);
+  const downloads = useMutation({
+    mutationFn: () => getArtifacts({ data: { buildId } }),
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : "Could not load artifacts"),
+  });
+  return (
+    <span className="flex flex-wrap items-center gap-3">
+      <button
+        className="text-primary underline"
+        onClick={() => downloads.mutate()}
+        disabled={downloads.isPending}
+      >
+        {downloads.isPending ? "Loading…" : downloads.data ? "Refresh links" : "Show downloads"}
+      </button>
+      {downloads.data?.map((artifact) => (
+        <a
+          key={artifact.name}
+          href={artifact.url}
+          className="text-primary underline"
+          rel="noopener noreferrer"
+        >
+          {artifact.name}
+        </a>
+      ))}
+      {downloads.data?.length === 0 ? <span>No installable artifacts returned.</span> : null}
+    </span>
   );
 }

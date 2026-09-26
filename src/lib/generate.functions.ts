@@ -12,7 +12,7 @@ import {
   safeName,
   zipFor,
 } from "./generate.server";
-import { mergeConfig } from "./appConfig";
+import { mergeConfig, validateConfig } from "./appConfig";
 import { buildFlutterProject } from "./flutterProject";
 
 export const generateProject = createServerFn({ method: "POST" })
@@ -69,6 +69,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
 
     const config = mergeConfig(app.name, app.website_url, app.config);
 
+    validateConfig(config);
     let branch = creds.codemagic_branch;
     let pushedToRepo = false;
     if (creds.github_token && creds.github_repo) {
@@ -86,9 +87,7 @@ export const startCloudBuild = createServerFn({ method: "POST" })
           ok: false as const,
           reason: "repo_error" as const,
           message:
-            err instanceof Error
-              ? err.message
-              : "Could not push the project to your repository.",
+            err instanceof Error ? err.message : "Could not push the project to your repository.",
         };
       }
     }
@@ -106,7 +105,14 @@ export const startCloudBuild = createServerFn({ method: "POST" })
             BUNDLE_ID: config.appInfo.packageId,
             WEBSITE_URL: config.appInfo.websiteUrl,
             APP_VERSION: config.appInfo.versionName,
-            BUILD_NUMBER: String(config.appInfo.versionCode),
+            APP_BUILD_NUMBER: String(config.appInfo.versionCode),
+            APP_CONFIG_JSON: JSON.stringify({
+              ...config,
+              env: config.env.map((entry) => ({
+                ...entry,
+                value: entry.secret ? "" : entry.value,
+              })),
+            }),
             LIVE_CONFIG_URL: publicLiveConfigUrl(data.appId),
           },
         },
@@ -201,7 +207,42 @@ export const refreshBuilds = createServerFn({ method: "POST" })
 
       b.status = status;
       b.artifact_url = artifactUrl;
+      b.message =
+        status === "success"
+          ? "Build finished"
+          : status === "failed"
+            ? reason || `Build ${build.status}`
+            : `Building (${build.status})`;
     }
 
     return { configured: true as const, builds };
+  });
+
+/** Refresh expiring download links and expose both Android artifacts. */
+export const getBuildArtifacts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((data: { buildId: string }) => data)
+  .handler(async ({ data, context }) => {
+    const { data: row, error } = await context.supabase
+      .from("builds")
+      .select("external_id,platform")
+      .eq("id", data.buildId)
+      .single();
+    if (error || !row?.external_id) throw new Error("Build not found");
+    const creds = await loadBuildCreds();
+    if (!creds) throw new Error(NOT_CONFIGURED);
+    const response = await cmFetch(creds.codemagic_token, `/builds/${row.external_id}`);
+    if (!response.ok) throw new Error("Could not retrieve build artifacts from Codemagic");
+    const build = response.body["build"] as
+      { artefacts?: Array<{ name?: string; url?: string }> } | undefined;
+    const extensions = row.platform === "android" ? /\.(apk|aab)$/i : /\.ipa$/i;
+    const artifacts = (build?.artefacts ?? []).filter(
+      (a) => a.url && extensions.test(a.name ?? ""),
+    );
+    return Promise.all(
+      artifacts.map(async (a) => ({
+        name: a.name!,
+        url: await publicArtefactUrl(creds.codemagic_token, a.url!),
+      })),
+    );
   });

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedBuildSettingsRouteImport } from './routes/_authenticated/build-settings'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedAppsAppIdRouteImport } from './routes/_authenticated/apps.$appId'
 import { Route as ApiPublicAppConfigAppIdRouteImport } from './routes/api/public/app-config.$appId'
@@ -30,6 +31,12 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedBuildSettingsRoute =
+  AuthenticatedBuildSettingsRouteImport.update({
+    id: '/build-settings',
+    path: '/build-settings',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -49,6 +56,7 @@ const ApiPublicAppConfigAppIdRoute = ApiPublicAppConfigAppIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/build-settings': typeof AuthenticatedBuildSettingsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/apps/$appId': typeof AuthenticatedAppsAppIdRoute
   '/api/public/app-config/$appId': typeof ApiPublicAppConfigAppIdRoute
@@ -56,6 +64,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/build-settings': typeof AuthenticatedBuildSettingsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/apps/$appId': typeof AuthenticatedAppsAppIdRoute
   '/api/public/app-config/$appId': typeof ApiPublicAppConfigAppIdRoute
@@ -65,6 +74,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/_authenticated/build-settings': typeof AuthenticatedBuildSettingsRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/apps/$appId': typeof AuthenticatedAppsAppIdRoute
   '/api/public/app-config/$appId': typeof ApiPublicAppConfigAppIdRoute
@@ -74,6 +84,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/build-settings'
     | '/dashboard'
     | '/apps/$appId'
     | '/api/public/app-config/$appId'
@@ -81,6 +92,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/build-settings'
     | '/dashboard'
     | '/apps/$appId'
     | '/api/public/app-config/$appId'
@@ -89,6 +101,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/_authenticated/build-settings'
     | '/_authenticated/dashboard'
     | '/_authenticated/apps/$appId'
     | '/api/public/app-config/$appId'
@@ -124,6 +137,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/build-settings': {
+      id: '/_authenticated/build-settings'
+      path: '/build-settings'
+      fullPath: '/build-settings'
+      preLoaderRoute: typeof AuthenticatedBuildSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -149,11 +169,13 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedBuildSettingsRoute: typeof AuthenticatedBuildSettingsRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedAppsAppIdRoute: typeof AuthenticatedAppsAppIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedBuildSettingsRoute: AuthenticatedBuildSettingsRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedAppsAppIdRoute: AuthenticatedAppsAppIdRoute,
 }

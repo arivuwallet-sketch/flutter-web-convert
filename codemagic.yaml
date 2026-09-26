@@ -1,0 +1,93 @@
+# This repository is the converter, not an already generated Flutter app.
+# Set APP_NAME, WEBSITE_URL (HTTPS), PACKAGE_ID, APP_VERSION and APP_BUILD_NUMBER
+# in Codemagic. Alternatively APP_CONFIG_FILE points to an AppConfig JSON file.
+# Start android-debug first. Release signing setup is documented in README.md.
+workflows:
+  android-debug:
+    name: Website to Android test APK
+    instance_type: linux_x2
+    environment:
+      node: 24
+      flutter: 3.47.3
+      java: 17
+    scripts:
+      - name: Generate and validate app
+        script: |
+          set -euo pipefail
+          node scripts/export-flutter.mjs .generated/flutter
+          cd .generated/flutter
+          bash tool/bootstrap.sh android
+          flutter pub get
+          dart run flutter_launcher_icons
+          dart run flutter_native_splash:create
+          flutter analyze --no-fatal-infos
+          flutter test
+          flutter build apk --debug
+    artifacts:
+      - .generated/flutter/build/app/outputs/flutter-apk/*.apk
+  android-release:
+    name: Website to signed Android APK and AAB
+    instance_type: linux_x2
+    environment:
+      node: 24
+      flutter: 3.47.3
+      java: 17
+      android_signing:
+        - nativeforge_upload
+    scripts:
+      - name: Generate and validate app
+        script: |
+          set -euo pipefail
+          node scripts/export-flutter.mjs .generated/flutter
+          cd .generated/flutter
+          bash tool/bootstrap.sh android
+          bash tool/check_signing.sh
+          flutter pub get
+          dart run flutter_launcher_icons
+          dart run flutter_native_splash:create
+          flutter analyze --no-fatal-infos
+          flutter test
+      - name: Build signed release files
+        script: |
+          set -euo pipefail
+          cd .generated/flutter
+          flutter build apk --release
+          flutter build appbundle --release
+    artifacts:
+      - .generated/flutter/build/app/outputs/flutter-apk/*.apk
+      - .generated/flutter/build/app/outputs/bundle/release/*.aab
+  ios-release:
+    name: Website to signed iOS IPA
+    instance_type: mac_mini_m2
+    environment:
+      node: 24
+      flutter: 3.47.3
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        provisioning_profiles:
+          - nativeforge_ios_profile
+        certificates:
+          - nativeforge_ios_certificate
+    scripts:
+      - name: Generate and validate app
+        script: |
+          set -euo pipefail
+          node scripts/export-flutter.mjs .generated/flutter
+          cd .generated/flutter
+          bash tool/bootstrap.sh ios
+          flutter pub get
+          dart run flutter_launcher_icons
+          dart run flutter_native_splash:create
+          flutter analyze --no-fatal-infos
+          flutter test
+      - name: Sign and build IPA
+        script: |
+          set -euo pipefail
+          cd .generated/flutter
+          xcode-project use-profiles
+          if [ -f ios/Podfile ]; then (cd ios && pod install); fi
+          flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - .generated/flutter/build/ios/ipa/*.ipa
+      - .generated/flutter/build/ios/archive/*.xcarchive

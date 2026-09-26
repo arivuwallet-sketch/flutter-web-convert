@@ -19,14 +19,16 @@ async function callAuth(method: "GET" | "PUT", body?: unknown) {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: body ? JSON.stringify(body) : undefined,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || `Auth request failed (${res.status})`);
   return text ? JSON.parse(text) : {};
 }
 
-export async function readStoredSettings(): Promise<import("./buildSettings.types").StoredBuildSettings> {
+export async function readStoredSettings(): Promise<
+  import("./buildSettings.types").StoredBuildSettings
+> {
   const user = await callAuth("GET");
   const raw = user?.user_metadata?.build_settings;
   return raw && typeof raw === "object"

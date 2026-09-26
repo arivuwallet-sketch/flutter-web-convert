@@ -13,7 +13,10 @@ export function publicLiveConfigUrl(appId: string): string {
 }
 
 export function safeName(s: string): string {
-  return (s || "app").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return (s || "app")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 async function fetchPng(url: string): Promise<Uint8Array | null> {
@@ -66,9 +69,9 @@ async function placeholderPng(hex: string, size = 1024): Promise<Uint8Array> {
       raw[pixel + 3] = 255;
     }
   }
-  const compressedStream = new Blob([raw.buffer]).stream().pipeThrough(
-    new CompressionStream("deflate"),
-  );
+  const compressedStream = new Blob([raw.buffer])
+    .stream()
+    .pipeThrough(new CompressionStream("deflate"));
   const compressed = new Uint8Array(await new Response(compressedStream).arrayBuffer());
   const header = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
   const ihdr = new Uint8Array(13);
@@ -161,7 +164,13 @@ export async function cmFetch(
   return { ok: res.ok, status: res.status, body };
 }
 
-export async function ghFetch(token: string, path: string, init?: RequestInit): Promise<any> {
+type GitHubObject = { sha?: string; object?: { sha: string }; message?: string };
+
+export async function ghFetch(
+  token: string,
+  path: string,
+  init?: RequestInit,
+): Promise<GitHubObject> {
   const res = await fetch(`${GH_API}${path}`, {
     ...init,
     headers: {
@@ -172,13 +181,17 @@ export async function ghFetch(token: string, path: string, init?: RequestInit): 
       ...(init?.headers ?? {}),
     },
   });
-  const body: any = await res.json().catch(() => ({}));
+  const body = (await res.json().catch(() => ({}))) as GitHubObject;
   if (!res.ok) {
-    throw new Error(
-      `GitHub ${path} failed [${res.status}]: ${body?.message ?? "unknown error"}`,
-    );
+    throw new Error(`GitHub ${path} failed [${res.status}]: ${body?.message ?? "unknown error"}`);
   }
   return body;
+}
+
+function requireSha(value: string | undefined): string {
+  if (!value || !/^[a-f0-9]{40}$/i.test(value))
+    throw new Error("GitHub returned an invalid commit or object SHA");
+  return value;
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -225,14 +238,14 @@ export async function pushProject(
       method: "POST",
       body: JSON.stringify({ content: toBase64(bin.bytes), encoding: "base64" }),
     });
-    tree.push({ path: bin.path, mode: "100644", type: "blob", sha: blob.sha });
+    tree.push({ path: bin.path, mode: "100644", type: "blob", sha: requireSha(blob.sha) });
   }
 
   let parent = "";
   let branchExists = false;
   try {
     const ref = await ghFetch(creds.github_token, `/repos/${repo}/git/ref/heads/${branch}`);
-    parent = ref.object.sha;
+    parent = requireSha(ref.object?.sha);
     branchExists = true;
   } catch {
     try {
@@ -240,7 +253,7 @@ export async function pushProject(
         creds.github_token,
         `/repos/${repo}/git/ref/heads/${creds.codemagic_branch}`,
       );
-      parent = fallback.object.sha;
+      parent = requireSha(fallback.object?.sha);
     } catch {
       parent = "";
     }
@@ -255,7 +268,7 @@ export async function pushProject(
     method: "POST",
     body: JSON.stringify({
       message: `Build ${config.appInfo.appName} (${new Date().toISOString()})`,
-      tree: treeRes.sha,
+      tree: requireSha(treeRes.sha),
       parents: parent ? [parent] : [],
     }),
   });
@@ -263,16 +276,16 @@ export async function pushProject(
   if (branchExists) {
     await ghFetch(creds.github_token, `/repos/${repo}/git/refs/heads/${branch}`, {
       method: "PATCH",
-      body: JSON.stringify({ sha: commit.sha, force: true }),
+      body: JSON.stringify({ sha: requireSha(commit.sha), force: false }),
     });
   } else {
     await ghFetch(creds.github_token, `/repos/${repo}/git/refs`, {
       method: "POST",
-      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }),
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: requireSha(commit.sha) }),
     });
   }
 
-  return { branch, commitSha: commit.sha as string };
+  return { branch, commitSha: requireSha(commit.sha) };
 }
 
 export function normaliseStatus(s: string): "running" | "success" | "failed" {
@@ -294,7 +307,7 @@ export function pickArtefact(
     const hit = artefacts.find((a) => (a.name ?? "").toLowerCase().endsWith(ext));
     if (hit) return hit;
   }
-  return artefacts[0];
+  return undefined;
 }
 
 export async function publicArtefactUrl(token: string, url: string): Promise<string> {

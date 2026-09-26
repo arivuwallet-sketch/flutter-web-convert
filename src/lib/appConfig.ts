@@ -172,7 +172,11 @@ export function hostnameOf(url: string): string {
 export function slugToPackageId(name: string, url: string): string {
   const host = hostnameOf(url);
   const parts = host.split(".").filter(Boolean).reverse();
-  const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const clean = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .replace(/^(\d)/, "app$1");
   const base = parts.length ? parts.map(clean).filter(Boolean) : ["app", "lovable"];
   const last = clean(name) || "app";
   const segments = [...base.slice(0, 2), last].filter(Boolean);
@@ -251,7 +255,12 @@ export function defaultConfig(name: string, websiteUrl: string): AppConfig {
       internalDomains: host ? [host] : [],
       openExternalInBrowser: true,
       blockedUrlPatterns: [],
-      deepLinkScheme: (name.toLowerCase().replace(/[^a-z0-9]/g, "") || "app").slice(0, 16),
+      deepLinkScheme: (
+        name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "")
+          .replace(/^(\d)/, "app$1") || "app"
+      ).slice(0, 16),
       universalLinkHosts: host ? [host] : [],
       handleMailto: true,
       handleTel: true,
@@ -312,4 +321,123 @@ export function mergeConfig(name: string, url: string, stored: unknown): AppConf
     }
   }
   return out as unknown as AppConfig;
+}
+
+/** Reject values that cannot be emitted safely as a native project. */
+export function validateConfig(c: AppConfig): void {
+  const fail = (message: string): never => {
+    throw new Error(message);
+  };
+  const validUrl = (value: string) => {
+    try {
+      const u = new URL(value);
+      return u.protocol === "https:" && !!u.hostname && !u.username && !u.password;
+    } catch {
+      return false;
+    }
+  };
+  if (!validUrl(c.appInfo.websiteUrl))
+    fail("Website URL must be an absolute HTTPS URL without credentials.");
+  if (!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(c.appInfo.packageId)) {
+    fail(
+      "Package ID must contain lowercase dot-separated identifiers starting with a letter (e.g. com.example.app).",
+    );
+  }
+  const reserved = new Set([
+    "class",
+    "interface",
+    "package",
+    "import",
+    "public",
+    "private",
+    "protected",
+    "static",
+    "void",
+    "int",
+    "new",
+    "return",
+    "null",
+    "true",
+    "false",
+    "default",
+    "switch",
+    "case",
+    "for",
+    "while",
+    "if",
+    "else",
+    "try",
+    "catch",
+    "finally",
+    "throw",
+    "throws",
+    "extends",
+    "implements",
+    "this",
+    "super",
+    "enum",
+    "assert",
+    "break",
+    "continue",
+    "do",
+    "double",
+    "float",
+    "long",
+    "short",
+    "byte",
+    "char",
+    "boolean",
+    "final",
+    "abstract",
+    "native",
+    "synchronized",
+    "transient",
+    "volatile",
+    "const",
+    "goto",
+    "instanceof",
+    "strictfp",
+  ]);
+  if (c.appInfo.packageId.split(".").some((part) => reserved.has(part)))
+    fail("Package ID cannot contain Java keywords.");
+  if (!/^\d+\.\d+\.\d+$/.test(c.appInfo.versionName))
+    fail("Version must use major.minor.patch format.");
+  if (
+    !Number.isSafeInteger(c.appInfo.versionCode) ||
+    c.appInfo.versionCode < 1 ||
+    c.appInfo.versionCode > 2100000000
+  )
+    fail("Build number must be an integer between 1 and 2100000000.");
+  if (!Number.isInteger(c.appInfo.minSdk) || c.appInfo.minSdk < 24 || c.appInfo.minSdk > 36)
+    fail("Android minimum SDK must be between 24 and 36.");
+  if (!/^\d+(\.\d+)?$/.test(c.appInfo.iosDeploymentTarget))
+    fail("iOS deployment target must be numeric.");
+  if (!/^[a-z][a-z0-9+.-]*$/.test(c.linkHandling.deepLinkScheme))
+    fail("Deep-link scheme must start with a lowercase letter.");
+  for (const host of [...c.linkHandling.internalDomains, ...c.linkHandling.universalLinkHosts]) {
+    if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/i.test(host))
+      fail("Domains must be hostnames without paths, schemes or wildcards.");
+  }
+  for (const color of [
+    c.branding.iconBackground,
+    c.branding.themeColor,
+    c.branding.accentColor,
+    c.splash.backgroundColor,
+    c.splash.spinnerColor,
+  ]) {
+    if (!/^#[\da-f]{6}$/i.test(color)) fail("Colors must use #RRGGBB format.");
+  }
+  if (
+    !Number.isInteger(c.splash.durationMs) ||
+    c.splash.durationMs < 0 ||
+    c.splash.durationMs > 30000
+  )
+    fail("Splash duration must be between 0 and 30000 milliseconds.");
+  if (
+    c.addons.bottomNav &&
+    (c.addons.bottomNavItems.length < 2 || c.addons.bottomNavItems.length > 5)
+  )
+    fail("Bottom navigation requires two to five items.");
+  if (c.addons.bottomNavItems.some((item) => !validUrl(item.url)))
+    fail("Navigation links must use absolute HTTPS URLs.");
 }

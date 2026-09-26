@@ -1,10 +1,17 @@
 // Pure generator: AppConfig -> a complete Flutter project as a file map.
 // Browser-safe (no node APIs) so the editor can preview any file.
 
-import type { AppConfig } from "./appConfig";
+import { validateConfig, type AppConfig } from "./appConfig.ts";
 
 const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
-const dartStr = (s: string) => `'${esc(s)}'`;
+const xml = (s: string) =>
+  s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+const dartStr = (s: string) => `'${esc(s).replace(/\$/g, "\\$").replace(/\r/g, "\\r")}'`;
 const dartList = (a: string[]) => `[${a.map(dartStr).join(", ")}]`;
 const hexToDart = (hex: string) => {
   const h = hex.replace("#", "").padEnd(6, "0").slice(0, 6);
@@ -21,7 +28,10 @@ function androidPermissions(c: AppConfig): string[] {
   if (p.camera) list.push("android.permission.CAMERA");
   if (p.microphone) list.push("android.permission.RECORD_AUDIO");
   if (p.location) {
-    list.push("android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION");
+    list.push(
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION",
+    );
   }
   if (p.backgroundLocation) list.push("android.permission.ACCESS_BACKGROUND_LOCATION");
   if (p.storage) {
@@ -31,7 +41,7 @@ function androidPermissions(c: AppConfig): string[] {
   if (p.contacts) list.push("android.permission.READ_CONTACTS");
   if (p.calendar) list.push("android.permission.READ_CALENDAR");
   if (p.bluetooth) list.push("android.permission.BLUETOOTH_CONNECT");
-  if (p.biometric) list.push("android.permission.USE_BIOMETRIC");
+  if (p.biometric || c.addons.biometricLock) list.push("android.permission.USE_BIOMETRIC");
   if (c.settings.keepScreenOn) list.push("android.permission.WAKE_LOCK");
   if (c.settings.downloads) list.push("android.permission.WRITE_EXTERNAL_STORAGE");
   return [...new Set(list)];
@@ -49,7 +59,7 @@ function iosUsageKeys(c: AppConfig): Record<string, string> {
   if (p.contacts) keys["NSContactsUsageDescription"] = r;
   if (p.calendar) keys["NSCalendarsUsageDescription"] = r;
   if (p.bluetooth) keys["NSBluetoothAlwaysUsageDescription"] = r;
-  if (p.biometric) keys["NSFaceIDUsageDescription"] = r;
+  if (p.biometric || c.addons.biometricLock) keys["NSFaceIDUsageDescription"] = r;
   return keys;
 }
 
@@ -68,22 +78,24 @@ function pubspec(c: AppConfig): string {
     "  url_launcher: ^6.3.2",
     "  shared_preferences: ^2.5.5",
     "  package_info_plus: ^10.2.1",
-    "  intl: ^0.20.3",
+    "  intl: any",
     "  http: ^1.6.0",
   ];
   if (c.addons.shareButton) deps.push("  share_plus: ^13.3.0");
-  if (c.addons.pushEnabled) deps.push("  firebase_core: ^4.15.0", "  firebase_messaging: ^16.7.0");
+  if (c.addons.pushEnabled || c.addons.analyticsEnabled) deps.push("  firebase_core: ^4.15.0");
+  if (c.addons.pushEnabled) deps.push("  firebase_messaging: ^16.7.0");
   if (c.addons.analyticsEnabled) deps.push("  firebase_analytics: ^12.6.0");
   if (c.addons.admobEnabled) deps.push("  google_mobile_ads: ^9.1.0");
   if (c.addons.biometricLock || c.permissions.biometric) deps.push("  local_auth: ^3.0.2");
   if (c.addons.ratingPrompt) deps.push("  in_app_review: ^2.0.12");
   if (c.addons.qrScanner) deps.push("  mobile_scanner: ^7.4.2");
   if (c.permissions.location || c.settings.geolocationBridge) deps.push("  geolocator: ^14.0.3");
+  if (c.settings.fileUploads) deps.push("  file_selector: ^1.1.0");
   if (c.settings.downloads) deps.push("  path_provider: ^2.1.6");
   deps.push("  permission_handler: ^13.0.2");
 
   return `name: ${c.appInfo.packageId.split(".").pop() || "webapp"}_app
-description: ${c.appInfo.description || c.appInfo.appName}
+description: ${JSON.stringify(c.appInfo.description || c.appInfo.appName)}
 publish_to: "none"
 version: ${c.appInfo.versionName}+${c.appInfo.versionCode}
 
@@ -252,6 +264,8 @@ function injectionDart(c: AppConfig): string {
     .join("\n");
 
   return `// GENERATED FILE - website overrides injected into the web view.
+import 'dart:convert';
+
 class WebOverrides {
   static const String css = ${dartStr(css)};
   static const String js = ${dartStr(js)};
@@ -262,12 +276,10 @@ class WebOverrides {
   /// pass the freshly downloaded values here.
   static String scriptFor(String cssIn, String jsIn) {
     final buffer = StringBuffer();
-    if (cssIn.isNotEmpty) {
-      final safe = cssIn.replaceAll('"', '\\\\"').replaceAll('\\n', ' ');
-      buffer.writeln("(function(){var s=document.createElement('style');"
-          "s.type='text/css';s.appendChild(document.createTextNode(\\"" +
-          safe +
-          "\\"));document.head.appendChild(s);})();");
+    {
+      buffer.writeln("(function(){var s=document.getElementById('nativeforge-style');"
+          "if(!s){s=document.createElement('style');s.id='nativeforge-style';document.head.appendChild(s);}"
+          "s.textContent=" + jsonEncode(cssIn) + ";})();");
     }
     if (jsIn.isNotEmpty) {
       buffer.writeln(jsIn);
@@ -360,18 +372,12 @@ class Live {
     }
   }
 
-  /// Adds a cache-busting stamp so the web view shows the newest site content.
-  static String freshUrl(String url) {
-    if (url.isEmpty) return url;
-    final uri = Uri.parse(url);
-    final query = Map<String, String>.from(uri.queryParameters);
-    query['_v'] = DateTime.now().millisecondsSinceEpoch.toString();
-    return uri.replace(queryParameters: query).toString();
-  }
+  // Preserve signed URLs, repeated query parameters and website routing.
+  static String freshUrl(String url) => url;
 
   static String _s(String key, String fallback) {
     final value = _data[key];
-    return value is String && value.isNotEmpty ? value : fallback;
+    return value is String ? value : fallback;
   }
 
   static bool _b(String key, bool fallback) {
@@ -402,7 +408,12 @@ class Live {
     return fallback;
   }
 
-  static String get startUrl => _s('startUrl', AppConfig.startUrl);
+  static String get startUrl {
+    final value = _s('startUrl', AppConfig.startUrl);
+    final uri = Uri.tryParse(value);
+    return uri != null && uri.scheme == 'https' && uri.host.isNotEmpty
+        ? value : AppConfig.startUrl;
+  }
   static Color get themeColor => _c('themeColor', AppConfig.themeColor);
   static Color get accentColor => _c('accentColor', AppConfig.accentColor);
   static Color get splashBackground =>
@@ -430,7 +441,7 @@ class Live {
               })
           .where((item) => item['url']!.isNotEmpty)
           .toList();
-      if (items.isNotEmpty) return items;
+      return items;
     }
     return AppConfig.bottomNavItems
         .map((item) => Map<String, String>.from(item))
@@ -447,7 +458,9 @@ import 'package:flutter/services.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-${c.addons.shareButton ? "import 'package:share_plus/share_plus.dart';\n" : ""}${c.addons.pushEnabled ? "import 'package:firebase_core/firebase_core.dart';\nimport 'package:firebase_messaging/firebase_messaging.dart';\n" : ""}${c.addons.biometricLock ? "import 'package:local_auth/local_auth.dart';\n" : ""}import 'app_config.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
+${c.settings.fileUploads ? "import 'package:file_selector/file_selector.dart';\n" : ""}
+${c.addons.shareButton ? "import 'package:share_plus/share_plus.dart';\n" : ""}${c.addons.pushEnabled || c.addons.analyticsEnabled ? "import 'package:firebase_core/firebase_core.dart';\n" : ""}${c.addons.pushEnabled ? "import 'package:firebase_messaging/firebase_messaging.dart';\n" : ""}${c.addons.biometricLock ? "import 'package:local_auth/local_auth.dart';\n" : ""}import 'app_config.dart';
 import 'live_config.dart';
 import 'web_overrides.dart';
 import 'strings.dart';
@@ -455,8 +468,7 @@ import 'strings.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Live.load();
-  unawaited(Live.refresh());
-${c.addons.pushEnabled ? "  await Firebase.initializeApp();\n  await FirebaseMessaging.instance.requestPermission();\n" : ""}  if (AppConfig.orientation == 'portrait') {
+${c.addons.pushEnabled || c.addons.analyticsEnabled ? "  await Firebase.initializeApp();\n" : ""}${c.addons.pushEnabled ? "  await FirebaseMessaging.instance.requestPermission();\n" : ""}  if (AppConfig.orientation == 'portrait') {
     await SystemChrome.setPreferredOrientations(
       [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown],
     );
@@ -555,20 +567,25 @@ class _WebHomeState extends State<WebHome> with WidgetsBindingObserver {
   int _navIndex = 0;
   String _locale = AppConfig.defaultLocale;
   Timer? _syncTimer;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _syncing = false;
+  bool _pageError = false;
+  bool _unlocked = !AppConfig.biometricLock;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _setupLocale();
-    _setupConnectivity();
     _setupController();
+    _setupConnectivity();
     _startLiveSync();
 ${c.addons.biometricLock ? "    _authenticate();\n" : ""}  }
 
   @override
   void dispose() {
     _syncTimer?.cancel();
+    _connectivitySubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -576,7 +593,7 @@ ${c.addons.biometricLock ? "    _authenticate();\n" : ""}  }
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(_syncLive(forceWebRefresh: true));
+      unawaited(_syncLive());
     }
   }
 
@@ -588,17 +605,23 @@ ${c.addons.biometricLock ? "    _authenticate();\n" : ""}  }
     _syncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncLive());
   }
 
-  Future<void> _syncLive({bool forceWebRefresh = false}) async {
-    if (!AppConfig.liveSync) {
-      if (forceWebRefresh && mounted) {
-        _controller.loadRequest(Uri.parse(Live.freshUrl(AppConfig.startUrl)));
+  Future<void> _syncLive() async {
+    if (!AppConfig.liveSync || !_unlocked || _syncing ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) return;
+    _syncing = true;
+    final previousUrl = Live.startUrl;
+    try {
+      final changed = await Live.refresh();
+      if (!changed || !mounted) return;
+      setState(() { _navIndex = 0; });
+      if (previousUrl != Live.startUrl) {
+        await _controller.loadRequest(Uri.parse(Live.startUrl));
+      } else {
+        _inject();
       }
-      return;
+    } finally {
+      _syncing = false;
     }
-    final changed = await Live.refresh();
-    if ((!changed && !forceWebRefresh) || !mounted) return;
-    setState(() {});
-    _controller.loadRequest(Uri.parse(Live.freshUrl(Live.startUrl)));
   }
 
 
@@ -615,21 +638,28 @@ ${
     ? `
   Future<void> _authenticate() async {
     final auth = LocalAuthentication();
-    final canCheck = await auth.canCheckBiometrics;
-    if (!canCheck) return;
-    await auth.authenticate(localizedReason: 'Unlock ' + AppConfig.appName);
+    try {
+      final allowed = await auth.authenticate(localizedReason: 'Unlock ' + AppConfig.appName);
+      if (!mounted || !allowed) return;
+      setState(() => _unlocked = true);
+      await _controller.loadRequest(Uri.parse(Live.startUrl));
+    } catch (_) {
+      // Fail closed when authentication is cancelled or unavailable.
+    }
   }
 `
     : ""
 }
   Future<void> _setupConnectivity() async {
-    final result = await Connectivity().checkConnectivity();
-    setState(() => _offline = result.contains(ConnectivityResult.none));
-    Connectivity().onConnectivityChanged.listen((event) {
-      final off = event.contains(ConnectivityResult.none);
-      if (mounted) setState(() => _offline = off);
-      if (!off) _controller.reload();
-    });
+    void update(List<ConnectivityResult> result) {
+      if (!mounted) return;
+      final off = result.contains(ConnectivityResult.none);
+      final reconnecting = _offline && !off;
+      setState(() => _offline = off);
+      if (reconnecting && _unlocked) _controller.reload();
+    }
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(update);
+    update(await Connectivity().checkConnectivity());
   }
 
   void _setupController() {
@@ -644,32 +674,60 @@ ${
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) {
-            if (mounted) setState(() => _loading = true);
+            if (mounted) setState(() { _loading = true; _pageError = false; });
             if (AppConfig.injectTiming == 'documentStart') _inject();
           },
           onPageFinished: (_) {
             if (mounted) setState(() => _loading = false);
             if (AppConfig.injectTiming == 'documentEnd') _inject();
           },
+          onWebResourceError: (error) {
+            if (error.isForMainFrame == true && mounted) {
+              setState(() { _loading = false; _pageError = true; });
+            }
+          },
           onNavigationRequest: _handleNavigation,
         ),
       );
-    final ua = AppConfig.userAgentSuffix;
-    if (ua.isNotEmpty) {
-      _controller.setUserAgent(
-        (AppConfig.desktopMode
-                ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
-                    '(KHTML, like Gecko) Chrome/122.0 Safari/537.36 '
-                : '') +
-            ua,
-      );
+    if (_controller.platform is AndroidWebViewController) {
+      final android = _controller.platform as AndroidWebViewController;
+      final cookies = WebViewCookieManager();
+      if (cookies.platform is AndroidWebViewCookieManager) {
+        (cookies.platform as AndroidWebViewCookieManager)
+            .setAcceptThirdPartyCookies(android, AppConfig.thirdPartyCookies);
+      }
+      android.setOnShowFileSelector((params) async {
+${
+  c.settings.fileUploads
+    ? `        try {
+          final files = params.mode == FileSelectorMode.openMultiple
+              ? await openFiles()
+              : [if (await openFile() case final file?) file];
+          return files.map((file) => Uri.file(file.path).toString()).toList();
+        } catch (_) {
+          return <String>[];
+        }`
+    : "        return <String>[];"
+}
+      });
     }
-    _controller.loadRequest(Uri.parse(Live.freshUrl(Live.startUrl)));
+    unawaited(_configureUserAgent());
+    if (_unlocked) _controller.loadRequest(Uri.parse(Live.startUrl));
+  }
+
+  Future<void> _configureUserAgent() async {
+    final base = await _controller.getUserAgent() ?? '';
+    final ua = AppConfig.desktopMode
+        ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15'
+        : base;
+    if (ua.isNotEmpty) {
+      await _controller.setUserAgent((ua + ' ' + AppConfig.userAgentSuffix).trim());
+    }
   }
 
   void _inject() {
     final script = WebOverrides.scriptFor(Live.customCss, Live.customJs);
-    if (script.isNotEmpty) {
+    if (AppConfig.javascriptEnabled && script.isNotEmpty) {
       _controller.runJavaScript(script);
     }
   }
@@ -681,7 +739,9 @@ ${
   }
 
   Future<NavigationDecision> _handleNavigation(NavigationRequest request) async {
-    final uri = Uri.parse(request.url);
+    if (!request.isMainFrame) return NavigationDecision.navigate;
+    final uri = Uri.tryParse(request.url);
+    if (uri == null) return NavigationDecision.prevent;
 
     for (final pattern in Live.blockedUrlPatterns) {
       if (pattern.isNotEmpty && request.url.contains(pattern)) {
@@ -697,11 +757,14 @@ ${
       await launchUrl(uri);
       return NavigationDecision.prevent;
     }
-    if (AppConfig.handleWhatsapp && uri.host.contains('wa.me')) {
+    if (AppConfig.handleWhatsapp && (uri.host == 'wa.me' || uri.scheme == 'whatsapp')) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
       return NavigationDecision.prevent;
     }
 
+    if (uri.scheme != 'https' && uri.scheme != 'http') {
+      return NavigationDecision.prevent;
+    }
     if (!_isInternal(uri) && AppConfig.openExternalInBrowser) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
       return NavigationDecision.prevent;
@@ -715,6 +778,7 @@ ${
       return false;
     }
     if (!AppConfig.confirmExit) return true;
+    if (!mounted) return false;
     final leave = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -741,13 +805,15 @@ ${
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        if (await _onWillPop() && mounted) Navigator.of(context).pop();
+        if (await _onWillPop() && mounted) await SystemNavigator.pop();
       },
       child: Scaffold(
         backgroundColor: Live.themeColor,
         body: SafeArea(
           top: !AppConfig.fullscreen,
-          child: _offline ? _offlineView() : _webView(),
+          child: !_unlocked
+              ? Center(child: ${c.addons.biometricLock ? "FilledButton(onPressed: _authenticate, child: const Text('Unlock app'))" : "const Text('App locked')"})
+              : _offline || _pageError ? _offlineView() : _webView(),
         ),
         floatingActionButton: ${
           c.addons.shareButton
@@ -759,7 +825,7 @@ ${
         )`
             : "null"
         },
-        bottomNavigationBar: Live.bottomNav && Live.bottomNavItems.isNotEmpty
+        bottomNavigationBar: _unlocked && Live.bottomNav && Live.bottomNavItems.length >= 2
             ? BottomNavigationBar(
                 currentIndex: _navIndex,
                 type: BottomNavigationBarType.fixed,
@@ -792,15 +858,17 @@ ${
       ],
     );
     if (!AppConfig.pullToRefresh) return view;
-    return RefreshIndicator(
-      onRefresh: () async => _controller.reload(),
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          SizedBox(height: MediaQuery.of(context).size.height - 24, child: view),
-        ],
+    return Stack(children: [
+      Positioned.fill(child: view),
+      Positioned(
+        right: 12, top: 8,
+        child: IconButton.filledTonal(
+          tooltip: 'Refresh website',
+          onPressed: () => _controller.reload(),
+          icon: const Icon(Icons.refresh),
+        ),
       ),
-    );
+    ]);
   }
 
   Widget _offlineView() {
@@ -824,7 +892,10 @@ ${
             ),
             const SizedBox(height: 20),
             FilledButton(
-              onPressed: () => _controller.reload(),
+              onPressed: () {
+                setState(() { _offline = false; _pageError = false; });
+                _controller.reload();
+              },
               child: Text(AppStrings.t(_locale, 'retry')),
             ),
           ],
@@ -841,15 +912,13 @@ function androidManifest(c: AppConfig): string {
     .map((p) => `    <uses-permission android:name="${p}" />`)
     .join("\n");
   const hosts = c.linkHandling.universalLinkHosts
-    .map(
-      (h) => `                <data android:scheme="https" android:host="${h}" />`,
-    )
+    .map((h) => `                <data android:scheme="https" android:host="${h}" />`)
     .join("\n");
   return `<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 ${perms}
 
     <application
-        android:label="${c.appInfo.appName}"
+        android:label="${xml(c.appInfo.appName)}"
         android:name="\${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="false">
@@ -888,7 +957,7 @@ ${
   c.addons.admobEnabled
     ? `        <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="${c.addons.admobAppId}" />\n`
+            android:value="${xml(c.addons.admobAppId)}" />\n`
     : ""
 }        <meta-data
             android:name="flutterEmbedding"
@@ -900,7 +969,7 @@ ${
 
 function infoPlist(c: AppConfig): string {
   const usage = Object.entries(iosUsageKeys(c))
-    .map(([k, v]) => `    <key>${k}</key>\n    <string>${v}</string>`)
+    .map(([k, v]) => `    <key>${k}</key>\n    <string>${xml(v)}</string>`)
     .join("\n");
   const orientation =
     c.settings.orientation === "landscape"
@@ -916,16 +985,28 @@ function infoPlist(c: AppConfig): string {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIMainStoryboardFile</key>
+    <string>Main</string>
     <key>CFBundleDisplayName</key>
-    <string>${c.appInfo.appName}</string>
+    <string>${xml(c.appInfo.appName)}</string>
     <key>CFBundleName</key>
-    <string>${c.appInfo.shortName || c.appInfo.appName}</string>
+    <string>${xml(c.appInfo.shortName || c.appInfo.appName)}</string>
     <key>CFBundleIdentifier</key>
     <string>${c.appInfo.packageId}</string>
     <key>CFBundleShortVersionString</key>
-    <string>${c.appInfo.versionName}</string>
+    <string>$(FLUTTER_BUILD_NAME)</string>
     <key>CFBundleVersion</key>
-    <string>${c.appInfo.versionCode}</string>
+    <string>$(FLUTTER_BUILD_NUMBER)</string>
     <key>MinimumOSVersion</key>
     <string>${Math.max(Number(c.appInfo.iosDeploymentTarget) || 15, 15).toFixed(1)}</string>
     <key>UIStatusBarStyle</key>
@@ -953,7 +1034,7 @@ ${orientation.map((o) => `        <string>${o}</string>`).join("\n")}
     </dict>
 ${
   c.addons.admobEnabled
-    ? `    <key>GADApplicationIdentifier</key>\n    <string>${c.addons.admobAppId}</string>\n`
+    ? `    <key>GADApplicationIdentifier</key>\n    <string>${xml(c.addons.admobAppId)}</string>\n`
     : ""
 }    <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
@@ -974,6 +1055,7 @@ bash tool/bootstrap.sh android
 flutter pub get
 dart run flutter_launcher_icons
 dart run flutter_native_splash:create
+bash tool/check_signing.sh  # configure CM_KEYSTORE_* and CM_KEY_* first
 flutter build apk --release
 # output: build/app/outputs/flutter-apk/app-release.apk
 \`\`\`
@@ -989,15 +1071,15 @@ flutter build appbundle --release
 \`\`\`bash
 bash tool/bootstrap.sh ios
 flutter pub get
-cd ios && pod install && cd ..
+if [ -f ios/Podfile ]; then (cd ios && pod install); fi
 flutter build ios --release --no-codesign
 open ios/Runner.xcworkspace   # sign with your Apple team, then Archive
 \`\`\`
 
 ## One-click cloud builds
 
-- \`codemagic.yaml\` — push this repo to Codemagic and both platforms build automatically.
-- \`.github/workflows/build.yml\` — GitHub Actions builds the APK on every push and uploads it as an artifact.
+- \`codemagic.yaml\` — select android-debug for a test APK. For android-release, upload your existing keystore with reference nativeforge_upload. For ios-release, upload a matching App Store distribution certificate and provisioning profile.
+- \`.github/workflows/build.yml\` — GitHub Actions builds a test APK and unsigned iOS app. Store distribution requires signed release artifacts.
 
 ## Where settings live
 
@@ -1010,7 +1092,14 @@ open ios/Runner.xcworkspace   # sign with your Apple team, then Archive
 | iOS permissions & deep links | \`ios/Runner/Info.plist\` |
 | Environment values | \`.env.example\`, \`assets/config/app_config.json\` |
 
-Regenerate this project any time from the web console after changing settings.
+The website is loaded live from its HTTPS URL. Newly deployed pages appear on reload;
+already-open pages need website realtime support or a manual refresh. Live console
+settings poll every 60 seconds and on foreground without resetting navigation.
+Native permissions, signing, icons and plugins require regeneration and rebuilding.
+Never embed private keys: secret-marked environment values are omitted from exports.
+
+Regenerate this project from the web console to receive generator fixes. Bootstrap
+preserves native customizations; use a fresh export when changing the package ID.
 `;
 }
 
@@ -1046,21 +1135,55 @@ if [ -f ios/Runner/Info.plist ]; then
   cp ios/Runner/Info.plist "$backup_dir/Info.plist"
 fi
 
-if [[ "$requested" == "android" || "$requested" == "both" ]]; then rm -rf android; fi
-if [[ "$requested" == "ios" || "$requested" == "both" ]]; then rm -rf ios; fi
-
-flutter create --platforms="$flutter_platforms" --project-name="${projectName}" --org="${organisation}" .
+flutter create --no-pub --platforms="$flutter_platforms" --project-name="${projectName}" --org="${organisation}" "$backup_dir/scaffold"
+# Copy missing scaffolding only. Preserve signing, Firebase files and native edits.
+python3 - "$backup_dir/scaffold" "$requested" <<'PYTHON'
+import pathlib, shutil, sys
+source = pathlib.Path(sys.argv[1])
+platforms = ['android', 'ios'] if sys.argv[2] == 'both' else [sys.argv[2]]
+for platform in platforms:
+    for item in (source / platform).rglob('*'):
+        target = pathlib.Path(platform) / item.relative_to(source / platform)
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        elif not target.exists():
+            shutil.copy2(item, target)
+if not pathlib.Path('.metadata').exists():
+    shutil.copy2(source / '.metadata', '.metadata')
+PYTHON
 
 if [[ "$requested" == "android" || "$requested" == "both" ]]; then
   if [ -f "$backup_dir/AndroidManifest.xml" ]; then
     cp "$backup_dir/AndroidManifest.xml" android/app/src/main/AndroidManifest.xml
   fi
-  gradle_file="android/app/build.gradle.kts"
+${
+  c.addons.biometricLock
+    ? `  python3 - <<'PYTHON'
+import pathlib
+for p in pathlib.Path('android/app/src/main/res').glob('values*/styles.xml'):
+    s = p.read_text()
+    for parent in ['@android:style/Theme.Light.NoTitleBar', '@android:style/Theme.Black.NoTitleBar']:
+        s = s.replace(parent, 'Theme.AppCompat.DayNight.NoActionBar')
+    p.write_text(s)
+PYTHON
+`
+    : ""
+}  gradle_file="android/app/build.gradle.kts"
   if [ -f "$gradle_file" ]; then
     sed -i.bak -E 's/^([[:space:]]*)minSdk[[:space:]]*=.*$/\\1minSdk = ${minSdk}/' "$gradle_file"
     sed -i.bak -E 's/^([[:space:]]*)compileSdk[[:space:]]*=.*$/\\1compileSdk = 36/' "$gradle_file"
     sed -i.bak -E 's/^([[:space:]]*)targetSdk[[:space:]]*=.*$/\\1targetSdk = 36/' "$gradle_file"
     rm -f "$gradle_file.bak"
+    python3 tool/configure_signing.py "$gradle_file"
+    # Opting out of AGP built-in Kotlin also requires applying the Kotlin plugin.
+    python3 - "$gradle_file" <<'PYTHON'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+if 'id("org.jetbrains.kotlin.android")' not in s and 'id("kotlin-android")' not in s:
+    s = s.replace('id("com.android.application")', 'id("com.android.application")\\n    id("org.jetbrains.kotlin.android")', 1)
+p.write_text(s)
+PYTHON
   fi
 
   # Flutter 3.47+ supports built-in Kotlin, but current plugin ecosystems
@@ -1086,12 +1209,19 @@ if [[ "$requested" == "android" || "$requested" == "both" ]]; then
     echo "ERROR: Android v1 embedding reference detected." >&2
     exit 1
   fi
-  grep -R -q "io\\.flutter\\.embedding\\.android\\.FlutterActivity" android/app/src/main \
+  grep -R -q "io\\.flutter\\.embedding\\.android\\.Flutter\\(Fragment\\)\\?Activity" android/app/src/main \
     || { echo "ERROR: Android embedding v2 MainActivity was not generated." >&2; exit 1; }
 fi
 
 if [[ "$requested" == "ios" || "$requested" == "both" ]]; then
-  if [ -f "$backup_dir/Info.plist" ]; then cp "$backup_dir/Info.plist" ios/Runner/Info.plist; fi
+  # Include current Flutter scene/launch metadata while preserving configured values.
+  python3 - "$backup_dir/scaffold/ios/Runner/Info.plist" <<'PYTHON'
+import pathlib, plistlib, sys
+p = pathlib.Path('ios/Runner/Info.plist')
+base = plistlib.loads(pathlib.Path(sys.argv[1]).read_bytes())
+base.update(plistlib.loads(p.read_bytes()))
+p.write_bytes(plistlib.dumps(base))
+PYTHON
   sed -i.bak 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = ${iosTarget}/g' ios/Runner.xcodeproj/project.pbxproj
   rm -f ios/Runner.xcodeproj/project.pbxproj.bak
   if [ -f ios/Podfile ]; then
@@ -1105,10 +1235,66 @@ echo "Modern Flutter platform files are ready for $requested."
 `;
 }
 
+const signingPython = `import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+source = path.read_text()
+marker = '// NativeForge release signing'
+if marker not in source:
+    source += """
+// NativeForge release signing
+android {
+    signingConfigs {
+        maybeCreate("release").apply {
+            val keyPath = System.getenv("CM_KEYSTORE_PATH")
+            if (!keyPath.isNullOrBlank()) {
+                storeFile = file(keyPath)
+                storePassword = System.getenv("CM_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("CM_KEY_ALIAS")
+                keyPassword = System.getenv("CM_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes.getByName("release") {
+        signingConfig = signingConfigs.getByName("release")
+    }
+}
+"""
+    path.write_text(source)
+`;
+
+const signingCheck = `#!/usr/bin/env bash
+set -euo pipefail
+for variable in CM_KEYSTORE_PATH CM_KEYSTORE_PASSWORD CM_KEY_ALIAS CM_KEY_PASSWORD; do
+  if [ -z "\${!variable:-}" ]; then
+    echo "Missing $variable. Configure nativeforge_upload in Codemagic Code signing identities. Use android-debug for an unsigned-store test APK." >&2
+    exit 1
+  fi
+done
+test -f "$CM_KEYSTORE_PATH" || { echo "Keystore file is missing" >&2; exit 1; }
+`;
+
 function codemagicYaml(c: AppConfig): string {
   return `workflows:
+  android-debug:
+    name: Test APK (not for Google Play)
+    instance_type: linux_x2
+    environment:
+      flutter: 3.47.3
+      java: 17
+    scripts:
+      - script: |
+          set -euo pipefail
+          bash tool/bootstrap.sh android
+          flutter pub get
+          dart run flutter_launcher_icons
+          dart run flutter_native_splash:create
+          flutter analyze --no-fatal-infos
+          flutter test
+          flutter build apk --debug
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
   android-release:
-    name: ${c.appInfo.appName} Android
+    name: ${JSON.stringify(c.appInfo.appName + " Android")}
     working_directory: .
     instance_type: linux_x2
     max_build_duration: 60
@@ -1116,30 +1302,35 @@ function codemagicYaml(c: AppConfig): string {
       flutter: 3.47.3
       java: 17
       ndk: 28.2.13676358
+      # Upload your existing Play upload key with reference nativeforge_upload.
+      android_signing:
+        - nativeforge_upload
     scripts:
       - name: Prepare current Flutter Android project
         script: |
+          set -euo pipefail
           test -f pubspec.yaml
           bash tool/bootstrap.sh android
           flutter doctor -v
           flutter pub get
           dart run flutter_launcher_icons
           dart run flutter_native_splash:create
-          flutter analyze
+          flutter analyze --no-fatal-infos
+          flutter test
       - name: Build Android release files
         script: |
+          set -euo pipefail
+          bash tool/check_signing.sh
           flutter build apk --release
           flutter build appbundle --release
     artifacts:
       - build/**/outputs/**/*.apk
       - build/**/outputs/**/*.aab
   ios-release:
-    name: ${c.appInfo.appName} iOS
+    name: ${JSON.stringify(c.appInfo.appName + " iOS")}
     working_directory: .
     instance_type: mac_mini_m2
     max_build_duration: 90
-    integrations:
-      app_store_connect: codemagic
     environment:
       flutter: 3.47.3
       xcode: latest
@@ -1150,22 +1341,23 @@ function codemagicYaml(c: AppConfig): string {
     scripts:
       - name: Prepare current Flutter iOS project
         script: |
+          set -euo pipefail
           test -f pubspec.yaml
           bash tool/bootstrap.sh ios
           flutter doctor -v
           flutter pub get
           dart run flutter_launcher_icons
           dart run flutter_native_splash:create
-          flutter analyze
+          flutter analyze --no-fatal-infos
+          flutter test
       - name: Set up signing
         script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "${c.appInfo.packageId}" --type IOS_APP_STORE --create
-          keychain add-certificates
+          set -euo pipefail
           xcode-project use-profiles
       - name: Install iOS dependencies and build
         script: |
-          cd ios && pod install && cd ..
+          set -euo pipefail
+          if [ -f ios/Podfile ]; then (cd ios && pod install); fi
           flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
@@ -1196,12 +1388,13 @@ jobs:
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: dart run flutter_native_splash:create
-      - run: flutter analyze
-      - run: flutter build apk --release
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test
+      - run: flutter build apk --debug
       - uses: actions/upload-artifact@v4
         with:
-          name: app-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: app-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
 
   ios:
     runs-on: macos-latest
@@ -1216,7 +1409,8 @@ jobs:
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: dart run flutter_native_splash:create
-      - run: flutter analyze
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test
       - run: flutter build ios --release --no-codesign
       - run: |
           mkdir -p build/ios-out
@@ -1228,41 +1422,58 @@ jobs:
 `;
 
 function envExample(c: AppConfig): string {
-  const lines = c.env
-    .filter((e) => e.key)
-    .map((e) => `${e.key}=${e.secret ? "" : e.value}`);
+  const lines = c.env.filter((e) => e.key).map((e) => `${e.key}=${e.secret ? "" : e.value}`);
   return `# Environment values for ${c.appInfo.appName}\n${lines.join("\n")}\n`;
 }
 
 function mainActivity(c: AppConfig): string {
   return `package ${c.appInfo.packageId}
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.${c.addons.biometricLock ? "FlutterFragmentActivity" : "FlutterActivity"}
 
-class MainActivity : FlutterActivity()
+class MainActivity : ${c.addons.biometricLock ? "FlutterFragmentActivity" : "FlutterActivity"}()
 `;
 }
 
 /** Full project as path -> text content. */
-export function buildFlutterProject(
-  c: AppConfig,
-  liveConfigUrl = "",
-): Record<string, string> {
+export function buildFlutterProject(c: AppConfig, liveConfigUrl = ""): Record<string, string> {
+  validateConfig(c);
   const files: Record<string, string> = {
     "README.md": readme(c),
     "pubspec.yaml": pubspec(c),
     "analysis_options.yaml": "include: package:flutter_lints/flutter.yaml\n",
-    ".gitignore": "build/\n.dart_tool/\n.packages\n.flutter-plugins\n.flutter-plugins-dependencies\nios/Pods/\n",
+    ".gitignore":
+      "build/\n.dart_tool/\n.packages\n.flutter-plugins\n.flutter-plugins-dependencies\nios/Pods/\n",
     ".env.example": envExample(c),
     "codemagic.yaml": codemagicYaml(c),
     "tool/bootstrap.sh": bootstrapScript(c),
+    "tool/configure_signing.py": signingPython,
+    "tool/check_signing.sh": signingCheck,
     ".github/workflows/build.yml": githubWorkflow,
     "lib/main.dart": mainDart(c),
+    "test/config_test.dart": `import 'package:flutter_test/flutter_test.dart';
+import '../lib/app_config.dart';
+import '../lib/web_overrides.dart';
+
+void main() {
+  test('generated app uses an HTTPS website', () {
+    expect(Uri.parse(AppConfig.startUrl).scheme, 'https');
+    expect(AppConfig.versionCode, greaterThan(0));
+  });
+  test('CSS injection safely encodes quotes and backslashes', () {
+    expect(WebOverrides.scriptFor('body { color: red; }', ''), contains('textContent='));
+  });
+}
+`,
     "lib/app_config.dart": appConfigDart(c, liveConfigUrl),
     "lib/live_config.dart": liveConfigDart(),
     "lib/web_overrides.dart": injectionDart(c),
     "lib/strings.dart": stringsDart(c),
-    "assets/config/app_config.json": JSON.stringify(c, null, 2),
+    "assets/config/app_config.json": JSON.stringify(
+      { ...c, env: c.env.map((e) => ({ ...e, value: e.secret ? "" : e.value })) },
+      null,
+      2,
+    ),
     "android/app/src/main/AndroidManifest.xml": androidManifest(c),
     [`android/app/src/main/kotlin/${packagePath(c.appInfo.packageId)}/MainActivity.kt`]:
       mainActivity(c),
@@ -1308,7 +1519,7 @@ export function buildFlutterProject(
     );
   }
 
-  if (c.addons.pushEnabled) {
+  if (c.addons.pushEnabled || c.addons.analyticsEnabled) {
     files["FIREBASE_SETUP.md"] = `# Push notifications
 
 1. Create a Firebase project (sender id: ${c.addons.firebaseSenderId || "your sender id"}).
