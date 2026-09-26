@@ -1077,7 +1077,7 @@ open ios/Runner.xcworkspace   # sign with your Apple team, then Archive
 
 ## One-click cloud builds
 
-- \`codemagic.yaml\` — select android-debug for a test APK. For android-release, upload your existing keystore with reference nativeforge_upload. For ios-release, upload a matching App Store distribution certificate and provisioning profile.
+- \`codemagic.yaml\` — select android-debug for a test APK. For android-release, provide the existing upload keystore through encrypted Codemagic environment variables (\`CM_KEYSTORE\`, \`CM_KEYSTORE_PASSWORD\`, \`CM_KEY_ALIAS\`, \`CM_KEY_PASSWORD\`). For ios-release, upload a matching App Store distribution certificate and provisioning profile.
 - \`.github/workflows/build.yml\` — GitHub Actions builds a test APK and unsigned iOS app. Store distribution requires signed release artifacts.
 
 ## Where settings live
@@ -1280,13 +1280,25 @@ android {
 
 const signingCheck = `#!/usr/bin/env bash
 set -euo pipefail
+
+# Codemagic Code Signing Identities are intentionally not required. This workflow
+# accepts the same credentials as encrypted environment variables so a missing
+# identity reference cannot stop the build before scripts start.
+if [ -n "\${CM_KEYSTORE:-}" ]; then
+  : "\${CM_KEYSTORE_PATH:=$CM_BUILD_DIR/codemagic.keystore}"
+  export CM_KEYSTORE_PATH
+  mkdir -p "$(dirname "$CM_KEYSTORE_PATH")"
+  printf '%s' "$CM_KEYSTORE" | base64 --decode > "$CM_KEYSTORE_PATH"
+fi
+
 for variable in CM_KEYSTORE_PATH CM_KEYSTORE_PASSWORD CM_KEY_ALIAS CM_KEY_PASSWORD; do
   if [ -z "\${!variable:-}" ]; then
-    echo "Missing $variable. Configure nativeforge_upload in Codemagic Code signing identities. Use android-debug for an unsigned-store test APK." >&2
+    echo "Missing $variable. Add CM_KEYSTORE (base64 keystore), CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS and CM_KEY_PASSWORD as encrypted Codemagic environment variables." >&2
     exit 1
   fi
 done
-test -f "$CM_KEYSTORE_PATH" || { echo "Keystore file is missing" >&2; exit 1; }
+
+test -f "$CM_KEYSTORE_PATH" || { echo "Keystore file is missing: $CM_KEYSTORE_PATH" >&2; exit 1; }
 `;
 
 function codemagicYaml(c: AppConfig): string {
@@ -1318,9 +1330,9 @@ function codemagicYaml(c: AppConfig): string {
       flutter: 3.47.3
       java: 17
       ndk: 28.2.13676358
-      # Upload your existing Play upload key with reference nativeforge_upload.
-      android_signing:
-        - nativeforge_upload
+      # Android release signing is supplied through encrypted Codemagic environment
+      # variables: CM_KEYSTORE (base64), CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS,
+      # CM_KEY_PASSWORD and optionally CM_KEYSTORE_PATH. Do not commit the keystore.
     scripts:
       - name: Prepare current Flutter Android project
         script: |

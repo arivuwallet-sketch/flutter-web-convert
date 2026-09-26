@@ -49,12 +49,14 @@ The root `codemagic.yaml` now generates the Flutter project first.
    configuration file using the `AppConfig` structure in `src/lib/appConfig.ts`.
 3. Run **android-debug** first. It produces an installable test APK without store
    credentials. It is not a Play Store release.
-4. For **android-release**, upload your existing Android upload keystore in
-   Codemagic **Code signing identities**, with reference `nativeforge_upload`.
-   The workflow reads `CM_KEYSTORE_PATH`, `CM_KEYSTORE_PASSWORD`, `CM_KEY_ALIAS`,
-   and `CM_KEY_PASSWORD`. It produces a signed APK **and** AAB. Never generate a
-   replacement key for an already published app without following Play's key
-   recovery process.
+4. For **android-release**, configure your existing Android upload keystore as
+   **encrypted Codemagic environment variables** instead of a Code Signing Identity:
+   `CM_KEYSTORE` (base64-encoded keystore), `CM_KEYSTORE_PASSWORD`,
+   `CM_KEY_ALIAS`, and `CM_KEY_PASSWORD`. Optionally set `CM_KEYSTORE_PATH`;
+   when omitted, the build uses `$CM_BUILD_DIR/codemagic.keystore`. Keep these
+   variables secret and never commit the keystore. The workflow produces a signed
+   APK **and** AAB. Never generate a replacement key for an already published app
+   without following Play's key recovery process.
 5. For **ios-release**, upload your Apple distribution certificate with reference
    `nativeforge_ios_certificate` and matching App Store provisioning profile
    with reference `nativeforge_ios_profile` in Codemagic Code signing identities.

@@ -32,8 +32,9 @@ workflows:
       node: 24
       flutter: 3.47.3
       java: 17
-      android_signing:
-        - nativeforge_upload
+      # Android release signing is supplied through encrypted Codemagic environment
+      # variables: CM_KEYSTORE (base64), CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS,
+      # CM_KEY_PASSWORD and optionally CM_KEYSTORE_PATH. Do not commit the keystore.
     scripts:
       - name: Generate and validate app
         script: |
