@@ -92,7 +92,6 @@ function pubspec(c: AppConfig): string {
   if (c.permissions.location || c.settings.geolocationBridge) deps.push("  geolocator: ^14.0.3");
   if (c.settings.fileUploads) deps.push("  file_selector: ^1.1.0");
   if (c.settings.downloads) deps.push("  path_provider: ^2.1.6");
-  deps.push("  permission_handler: ^13.0.2");
 
   return `name: ${c.appInfo.packageId.split(".").pop() || "webapp"}_app
 description: ${JSON.stringify(c.appInfo.description || c.appInfo.appName)}
