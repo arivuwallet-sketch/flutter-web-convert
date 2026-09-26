@@ -1126,6 +1126,23 @@ case "$requested" in
   *) echo "Usage: bash tool/bootstrap.sh [android|ios|both]" >&2; exit 2 ;;
 esac
 
+# Asset tools must only target the platforms bootstrapped on this runner.
+python3 - "$requested" <<'ASSET_PLATFORMS'
+import pathlib, re, sys
+path = pathlib.Path('pubspec.yaml')
+text = path.read_text()
+for section in ('flutter_launcher_icons', 'flutter_native_splash'):
+    pattern = r'(?m)^' + section + r':\\n(?:[ \t].*\\n|\\n)*'
+    match = re.search(pattern, text)
+    if not match:
+        raise SystemExit('Missing asset configuration: ' + section)
+    block = re.sub(r'(?m)^  (android|ios|web):.*\\n', '', match.group())
+    flags = ''.join('  ' + platform + ': ' + str(sys.argv[1] in (platform, 'both')).lower() + '\\n' for platform in ('android', 'ios'))
+    block = block.replace(section + ':\\n', section + ':\\n' + flags + ('  web: false\\n' if section == 'flutter_native_splash' else ''), 1)
+    text = text[:match.start()] + block + text[match.end():]
+path.write_text(text)
+ASSET_PLATFORMS
+
 backup_dir="$(mktemp -d)"
 trap 'rm -rf "$backup_dir"' EXIT
 if [ -f android/app/src/main/AndroidManifest.xml ]; then

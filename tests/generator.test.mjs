@@ -111,3 +111,26 @@ test("biometric variant blocks content until authentication succeeds", () => {
   assert.ok(files["ios/Runner/Info.plist"].includes("NSFaceIDUsageDescription"));
   assert.ok(files["lib/main.dart"].includes("if (_unlocked) _controller.loadRequest"));
 });
+
+
+test("asset generation targets only the bootstrapped platform and can switch targets", () => {
+  const files = buildFlutterProject(config());
+  const script = files["tool/bootstrap.sh"].split("<<'ASSET_PLATFORMS'\n")[1].split("\nASSET_PLATFORMS")[0];
+  const dir = mkdtempSync(join(tmpdir(), "asset-platforms-"));
+  try {
+    writeFileSync(join(dir, "pubspec.yaml"), files["pubspec.yaml"]);
+    for (const platform of ["android", "ios", "both", "android"]) {
+      execFileSync("python3", ["-c", script, platform], { cwd: dir });
+      const parsed = yaml.load(readFileSync(join(dir, "pubspec.yaml"), "utf8"));
+      for (const section of ["flutter_launcher_icons", "flutter_native_splash"]) {
+        assert.equal(parsed[section].android, platform !== "ios");
+        assert.equal(parsed[section].ios, platform !== "android");
+      }
+      assert.equal(parsed.flutter_native_splash.web, false);
+      assert.equal(parsed.flutter_launcher_icons.image_path, "assets/icon.png");
+      assert.ok(parsed.flutter_native_splash.android_12.image);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
