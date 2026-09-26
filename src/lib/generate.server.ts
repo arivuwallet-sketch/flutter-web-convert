@@ -22,7 +22,7 @@ export function safeName(s: string): string {
 async function fetchPng(url: string): Promise<Uint8Array | null> {
   if (!url || !/^https?:\/\//.test(url)) return null;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) return null;
     const buf = new Uint8Array(await res.arrayBuffer());
     if (buf.byteLength > 5_000_000 || buf.byteLength < 8) return null;
@@ -107,20 +107,21 @@ export async function zipFor(
   for (const [path, content] of Object.entries(files)) {
     if (platform === "android" && path.startsWith("ios/")) continue;
     if (platform === "ios" && path.startsWith("android/")) continue;
-    zip.file(path, content);
+    zip.file(path, content, { compression: "DEFLATE" });
   }
 
   const icon =
     (await fetchPng(config.branding.iconUrl)) ??
-    (await placeholderPng(config.branding.iconBackground));
-  zip.file("assets/icon.png", icon);
+    (await placeholderPng(config.branding.iconBackground, 256));
+  // PNG is already compressed; storing it avoids expensive double compression.
+  zip.file("assets/icon.png", icon, { compression: "STORE" });
 
   const splash =
     (await fetchPng(config.splash.logoUrl || config.branding.iconUrl)) ??
-    (await placeholderPng(config.splash.backgroundColor));
-  zip.file("assets/splash.png", splash);
+    (await placeholderPng(config.splash.backgroundColor, 256));
+  zip.file("assets/splash.png", splash, { compression: "STORE" });
 
-  return zip.generateAsync({ type: "base64", compression: "DEFLATE" });
+  return zip.generateAsync({ type: "base64", compression: "DEFLATE", compressionOptions: { level: 6 } });
 }
 
 export type BuildCreds = {

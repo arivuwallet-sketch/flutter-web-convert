@@ -166,7 +166,16 @@ function AppEditor() {
   const download = useMutation({
     mutationFn: async (platform: "android" | "ios" | "both") => {
       if (config && dirty) await save.mutateAsync(config);
-      return generate({ data: { appId, platform } });
+      const result = await Promise.race([
+        generate({ data: { appId, platform } }),
+        new Promise<never>((_, reject) =>
+          window.setTimeout(
+            () => reject(new Error("Android package generation timed out. Please retry.")),
+            90000,
+          ),
+        ),
+      ]);
+      return result;
     },
     onSuccess: (res) => {
       downloadBase64Zip(res.filename, res.base64);
